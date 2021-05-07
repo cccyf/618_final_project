@@ -17,6 +17,7 @@
 #include "particleSystem.cuh"
 #include "particles_kernel.cuh"
 
+
 #include <cuda_runtime.h>
 
 #include <helper_functions.h>
@@ -124,6 +125,7 @@ void
 ParticleSystem::_initialize(int numParticles)
 {
     assert(!m_bInitialized);
+    int type = 0;
 
     m_numParticles = numParticles;
 
@@ -132,12 +134,7 @@ ParticleSystem::_initialize(int numParticles)
     m_hVel = new float[m_numParticles*4];
     memset(m_hPos, 0, m_numParticles*4*sizeof(float));
     memset(m_hVel, 0, m_numParticles*4*sizeof(float));
-
-    m_hCellStart = new uint[m_numGridCells];
-    memset(m_hCellStart, 0, m_numGridCells*sizeof(uint));
-
-    m_hCellEnd = new uint[m_numGridCells];
-    memset(m_hCellEnd, 0, m_numGridCells*sizeof(uint));
+    
 
     // allocate GPU data
     unsigned int memSize = sizeof(float) * 4 * m_numParticles;
@@ -234,19 +231,126 @@ ParticleSystem::_finalize()
     }
 }
 
+
+
+Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v2, float m_dist) {
+    float m_ks = 50.f;
+    float m_kd = 1.f;
+    Vector3f pos_diff = make_vector(p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]);
+    Vector3f force = -(m_ks * (length(pos_diff) - m_dist) + m_kd * (make_vector(v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]) * pos_diff) / length(pos_diff)) * pos_diff / length(pos_diff);
+    return force;
+}
+
 // step the simulation
 void
 ParticleSystem::update(float deltaTime)
-{  
-    float* data = getArray(POSITION);
-    for (int i = 0; i < m_numParticles * 4; i+=4) {
-        data[i] += 0.01f * deltaTime;
+{   
+    //afloat* dPos = getArray(POSITION);
+    float* dPos = m_hPos;
+    float* dVel = m_hVel;
+    uint side = sqrt(m_numParticles);
+    Vector3f force_accumulator;
+    for (uint i = 0; i < m_numParticles; i++) {
+        force_accumulator = make_vector(0.f, 9.8f, 0.f);
+        uint xind = i % side;
+        uint yind = i / side;
+        float* cPos = &dPos[xind + yind * side];
+        float* cVel = &dVel[xind + yind * side];
+        float dist = 0.1f;
+        if (xind > 0) {
+            float* nPos = &dPos[xind - 1 + yind * side];
+            float* nVel = &dVel[xind - 1 + yind * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (yind > 0) {
+            float* nPos = &dPos[xind + (yind-1) * side];
+            float* nVel = &dVel[xind + (yind-1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (xind < side - 1) {
+            float* nPos = &dPos[xind + 1 + yind * side];
+            float* nVel = &dVel[xind + 1 + yind * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (yind < side - 1) {
+            float* nPos = &dPos[xind + (yind + 1) * side];
+            float* nVel = &dVel[xind + (yind + 1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        dist *= sqrt(2);
+
+        if (xind > 0 && yind > 0) {
+            float* nPos = &dPos[xind - 1 + (yind - 1) * side];
+            float* nVel = &dVel[xind - 1 + (yind - 1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (xind < side-1 && yind > 0) {
+            float* nPos = &dPos[xind + 1 + (yind - 1) * side];
+            float* nVel = &dVel[xind + 1 + (yind - 1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (xind > 0 && yind < side - 1) {
+            float* nPos = &dPos[xind - 1 + (yind + 1) * side];
+            float* nVel = &dVel[xind - 1 + (yind + 1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (xind < side - 1 && yind < side - 1) {
+            float* nPos = &dPos[xind + 1 + (yind + 1) * side];
+            float* nVel = &dVel[xind + 1 + (yind + 1) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        dist *= sqrt(2);
+
+        if (xind > 1) {
+            float* nPos = &dPos[xind - 2 + yind * side];
+            float* nVel = &dVel[xind - 2 + yind * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (yind > 1) {
+            float* nPos = &dPos[xind + (yind - 2) * side];
+            float* nVel = &dVel[xind + (yind - 2) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (xind < side - 2) {
+            float* nPos = &dPos[xind + 2 + yind * side];
+            float* nVel = &dVel[xind + 2 + yind * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+
+        if (yind < side - 2) {
+            float* nPos = &dPos[xind + (yind + 2) * side];
+            float* nVel = &dVel[xind + (yind + 2) * side];
+            force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+        }
+        Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
+        Vector3f vel = make_vector(cVel[0], cVel[1], cVel[2]);
+        pos += 0.01f * vel;
+        vel = 0.98f * pos + 0.01f * force_accumulator;
+        cPos[0] = pos.x;
+        cPos[1] = pos.y;
+        cPos[2] = pos.z;
+        cVel[0] = vel.x;
+        cVel[1] = vel.y;
+        cVel[2] = vel.z;
     }
-    setArray(POSITION, data, 0, m_numParticles);
+
+    
+    //setArray(POSITION, dPos, 0, m_numParticles);
+    //setArray(VELOCITY, dVel, 0, m_numParticles);
+    
     /*
     assert(m_bInitialized);
 
-    float *dPos;
     
     if (m_bUseOpenGL)
     {
@@ -256,8 +360,8 @@ ParticleSystem::update(float deltaTime)
     {
         dPos = (float *) m_cudaPosVBO;
     }
-
-    dPos[0] += 0.1f;
+    
+    
 
     
     // update constants
@@ -483,6 +587,28 @@ ParticleSystem::reset(ParticleConfig config)
                 uint gridSize[3];
                 gridSize[0] = gridSize[1] = gridSize[2] = s;
                 initGrid(gridSize, m_params.particleRadius*2.0f, jitter, m_numParticles);
+            }
+            break;
+
+        case CONFIG_CLOTH:
+            {
+                float start_x = 0.f;
+                float start_y = 0.f;
+                float offset = 0.1f;
+                int p = 0, v = 0;
+                uint side = sqrt(m_numParticles);
+                for (uint i = 0; i < m_numParticles; i++) {
+                    uint xind = i % side;
+                    uint yind = i / side;
+                    m_hPos[p++] = start_x + xind*offset;
+                    m_hPos[p++] = 0.f;
+                    m_hPos[p++] = start_y + yind * offset;
+                    m_hPos[p++] = 1.0f; // radius
+                    m_hVel[v++] = 0.0f;
+                    m_hVel[v++] = 0.0f;
+                    m_hVel[v++] = 0.0f;
+                    m_hVel[v++] = 0.0f;
+                }
             }
             break;
     }

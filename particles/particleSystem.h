@@ -18,6 +18,7 @@
 #include <helper_functions.h>
 #include "particles_kernel.cuh"
 #include "vector_functions.h"
+#include "Vector.hpp"
 
 // Particle system class
 class ParticleSystem
@@ -30,7 +31,8 @@ class ParticleSystem
         {
             CONFIG_RANDOM,
             CONFIG_GRID,
-            _NUM_CONFIGS
+            _NUM_CONFIGS,
+            CONFIG_CLOTH
         };
 
         enum ParticleArray
@@ -131,6 +133,7 @@ class ParticleSystem
         {
             return m_params.cellSize;
         }
+        Vector3f compute_force(float* p1, float* p2, float* v1, float* v2, float m_dist);
 
         void addSphere(int index, float *pos, float *vel, int r, float spacing);
 
@@ -142,6 +145,8 @@ class ParticleSystem
         void _finalize();
 
         void initGrid(uint *size, float spacing, float jitter, uint numParticles);
+
+        
 
     protected: // data
         bool m_bInitialized, m_bUseOpenGL;
