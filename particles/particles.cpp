@@ -56,7 +56,7 @@
 #define THRESHOLD         0.30f
 
 #define GRID_SIZE       64
-#define NUM_PARTICLES   16384
+#define NUM_PARTICLES   16
 
 const uint width = 640, height = 480;
 
@@ -610,6 +610,8 @@ void special(int k, int x, int y)
 
 void idle(void)
 {
+    /*
+    
     if ((idleCounter++ > idleDelay) && (demoMode==false))
     {
         demoMode = true;
@@ -627,8 +629,9 @@ void idle(void)
             demoCounter = 0;
         }
     }
-
+    */
     glutPostRedisplay();
+    
 }
 
 void initParams()

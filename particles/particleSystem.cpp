@@ -237,11 +237,17 @@ ParticleSystem::_finalize()
 // step the simulation
 void
 ParticleSystem::update(float deltaTime)
-{
+{  
+    float* data = getArray(POSITION);
+    for (int i = 0; i < m_numParticles * 4; i+=4) {
+        data[i] += 0.01f * deltaTime;
+    }
+    setArray(POSITION, data, 0, m_numParticles);
+    /*
     assert(m_bInitialized);
 
     float *dPos;
-
+    
     if (m_bUseOpenGL)
     {
         dPos = (float *) mapGLBufferObject(&m_cuda_posvbo_resource);
@@ -251,23 +257,26 @@ ParticleSystem::update(float deltaTime)
         dPos = (float *) m_cudaPosVBO;
     }
 
+    dPos[0] += 0.1f;
+
+    
     // update constants
     setParameters(&m_params);
-
+    
     // integrate
     integrateSystem(
         dPos,
         m_dVel,
         deltaTime,
         m_numParticles);
-
+    
     // calculate grid hash
     calcHash(
         m_dGridParticleHash,
         m_dGridParticleIndex,
         dPos,
         m_numParticles);
-
+    
     // sort particles based on hash
     sortParticles(m_dGridParticleHash, m_dGridParticleIndex, m_numParticles);
 
@@ -295,12 +304,14 @@ ParticleSystem::update(float deltaTime)
         m_dCellEnd,
         m_numParticles,
         m_numGridCells);
-
+    
     // note: do unmap at end here to avoid unnecessary graphics/CUDA context switch
     if (m_bUseOpenGL)
     {
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
+    */
+    
 }
 
 void
