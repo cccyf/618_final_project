@@ -31,8 +31,8 @@
     }                                                           \
   } while (0)
 
-void compileFileToPTX(char *filename, int argc, char **argv, char **ptxResult,
-                      size_t *ptxResultSize, int requiresCGheaders) {
+void compileFileToCUBIN(char *filename, int argc, char **argv, char **cubinResult,
+                      size_t *cubinResultSize, int requiresCGheaders) {
   std::ifstream inputFile(filename,
                           std::ios::in | std::ios::binary | std::ios::ate);
 
@@ -52,7 +52,36 @@ void compileFileToPTX(char *filename, int argc, char **argv, char **ptxResult,
 
   int numCompileOptions = 0;
 
-  char *compileParams[1];
+  char *compileParams[2];
+
+  int major = 0, minor = 0;
+
+  // Picks the best CUDA device available
+  CUdevice cuDevice = findCudaDeviceDRV(argc, (const char **)argv);
+
+  // get compute capabilities and the devicename
+  checkCudaErrors(cuDeviceGetAttribute(
+      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, cuDevice));
+  checkCudaErrors(cuDeviceGetAttribute(
+      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cuDevice));
+  
+  {
+  // Compile cubin for the GPU arch on which are going to run cuda kernel.
+  std::string compileOptions;
+  compileOptions = "--gpu-architecture=sm_";
+
+  compileParams[numCompileOptions] = reinterpret_cast<char *>(
+                  malloc(sizeof(char) * (compileOptions.length() + 10)));
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+  sprintf_s(compileParams[numCompileOptions], sizeof(char) * (compileOptions.length() + 10),
+            "%s%d%d", compileOptions.c_str(), major, minor);
+#else
+  snprintf(compileParams[numCompileOptions], compileOptions.size() + 10, "%s%d%d",
+           compileOptions.c_str(), major, minor);
+#endif
+  }
+
+  numCompileOptions++;
 
   if (requiresCGheaders) {
     std::string compileOptions;
@@ -76,13 +105,13 @@ void compileFileToPTX(char *filename, int argc, char **argv, char **ptxResult,
           argv[0]);
     }
     compileOptions += path.c_str();
-    compileParams[0] = reinterpret_cast<char *>(
+    compileParams[numCompileOptions] = reinterpret_cast<char *>(
         malloc(sizeof(char) * (compileOptions.length() + 1)));
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    sprintf_s(compileParams[0], sizeof(char) * (compileOptions.length() + 1),
+    sprintf_s(compileParams[numCompileOptions], sizeof(char) * (compileOptions.length() + 1),
               "%s", compileOptions.c_str());
 #else
-    snprintf(compileParams[0], compileOptions.size(), "%s",
+    snprintf(compileParams[numCompileOptions], compileOptions.size(), "%s",
              compileOptions.c_str());
 #endif
     numCompileOptions++;
@@ -112,19 +141,20 @@ void compileFileToPTX(char *filename, int argc, char **argv, char **ptxResult,
   free(log);
 
   NVRTC_SAFE_CALL("nvrtcCompileProgram", res);
-  // fetch PTX
-  size_t ptxSize;
-  NVRTC_SAFE_CALL("nvrtcGetPTXSize", nvrtcGetPTXSize(prog, &ptxSize));
-  char *ptx = reinterpret_cast<char *>(malloc(sizeof(char) * ptxSize));
-  NVRTC_SAFE_CALL("nvrtcGetPTX", nvrtcGetPTX(prog, ptx));
-  NVRTC_SAFE_CALL("nvrtcDestroyProgram", nvrtcDestroyProgram(&prog));
-  *ptxResult = ptx;
-  *ptxResultSize = ptxSize;
 
-  if (requiresCGheaders) free(compileParams[0]);
+  size_t codeSize;
+  NVRTC_SAFE_CALL("nvrtcGetCUBINSize", nvrtcGetCUBINSize(prog, &codeSize));
+  char *code = new char[codeSize];
+  NVRTC_SAFE_CALL("nvrtcGetCUBIN", nvrtcGetCUBIN(prog, code));
+  *cubinResult = code;
+  *cubinResultSize = codeSize;
+
+  for (int i = 0; i < numCompileOptions; i++) {
+    free(compileParams[i]);
+  }
 }
 
-CUmodule loadPTX(char *ptx, int argc, char **argv) {
+CUmodule loadCUBIN(char *cubin, int argc, char **argv) {
   CUmodule module;
   CUcontext context;
   int major = 0, minor = 0;
@@ -142,11 +172,10 @@ CUmodule loadPTX(char *ptx, int argc, char **argv) {
   printf("> GPU Device has SM %d.%d compute capability\n", major, minor);
 
   checkCudaErrors(cuInit(0));
-  checkCudaErrors(cuDeviceGet(&cuDevice, 0));
   checkCudaErrors(cuCtxCreate(&context, 0, cuDevice));
 
-  checkCudaErrors(cuModuleLoadDataEx(&module, ptx, 0, 0, 0));
-  free(ptx);
+  checkCudaErrors(cuModuleLoadData(&module, cubin));
+  free(cubin);
 
   return module;
 }

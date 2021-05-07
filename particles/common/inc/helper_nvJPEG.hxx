@@ -61,6 +61,7 @@
 #include "nvjpeg.h"
 #include "helper_cuda.h"
 #include "helper_timer.h"
+#include "helper_string.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -135,7 +136,7 @@ int writeBMP(const char *filename, const unsigned char *d_chanR, int pitchR,
   headers[11] = 0;          // biClrUsed
   headers[12] = 0;          // biClrImportant
 
-  if (!(outfile = fopen(filename, "wb"))) {
+  if (!(FOPEN(outfile, filename, "wb"))) {
     std::cerr << "Cannot open file: " << filename << std::endl;
     return 1;
   }
@@ -250,7 +251,7 @@ int writeBMPi(const char *filename, const unsigned char *d_RGB, int pitch,
   headers[11] = 0;          // biClrUsed
   headers[12] = 0;          // biClrImportant
 
-  if (!(outfile = fopen(filename, "wb"))) {
+  if (!(FOPEN(outfile, filename, "wb"))) {
     std::cerr << "Cannot open file: " << filename << std::endl;
     return 1;
   }

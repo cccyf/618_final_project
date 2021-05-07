@@ -17,6 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <iostream>
+#include <cstring>
+#include <sstream>
 
 #include <helper_string.h>
 
@@ -92,6 +95,8 @@ inline int _ConvertSMVer2CoresDRV(int major, int minor) {
       {0x70,  64},
       {0x72,  64},
       {0x75,  64},
+      {0x80,  64},
+      {0x86, 128},
       {-1, -1}};
 
   int index = 0;
@@ -346,6 +351,37 @@ inline bool checkCudaCapabilitiesDRV(int major_version, int minor_version,
   }
 }
 #endif
+bool inline findFatbinPath(const char *module_file, std::string &module_path, char **argv, std::ostringstream &ostrm)
+{
+    char *actual_path = sdkFindFilePath(module_file, argv[0]);
+
+    if (actual_path)
+    {
+        module_path = actual_path;
+    }
+    else
+    {
+        printf("> findModulePath file not found: <%s> \n", module_file);
+        return false;
+    }
+
+    if (module_path.empty())
+    {
+        printf("> findModulePath could not find file: <%s> \n", module_file);
+        return false;
+    }
+    else
+    {
+        printf("> findModulePath found file at <%s>\n", module_path.c_str());
+        if (module_path.rfind("fatbin") != std::string::npos)
+        {
+            std::ifstream fileIn(module_path.c_str(), std::ios::binary);
+            ostrm << fileIn.rdbuf();
+            fileIn.close();
+        }
+        return true;
+    }
+}
 
   // end of CUDA Helper Functions
 
