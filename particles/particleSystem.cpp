@@ -74,6 +74,12 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     m_params.gravity = make_float3(0.0f, -0.0003f, 0.0f);
     m_params.globalDamping = 1.0f;
 
+    dt = 0.001f;
+    offset = 0.05f;
+    damp = 0.98f;
+    mass = 100.f / m_numParticles;
+
+
     _initialize(numParticles);
 }
 
@@ -235,7 +241,7 @@ ParticleSystem::_finalize()
 
 Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v2, float m_dist) {
     float m_ks = 50.f;
-    float m_kd = 1.f;
+    float m_kd = 0.98f;
     Vector3f pos_diff = make_vector(p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]);
     Vector3f force = -(m_ks * (length(pos_diff) - m_dist) + m_kd * (make_vector(v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]) * pos_diff) / length(pos_diff)) * pos_diff / length(pos_diff);
     return force;
@@ -250,94 +256,94 @@ ParticleSystem::update(float deltaTime)
     float* dVel = m_hVel;
     uint side = sqrt(m_numParticles);
     Vector3f force_accumulator;
-    for (uint i = 0; i < m_numParticles; i++) {
-        force_accumulator = make_vector(0.f, 9.8f, 0.f);
+    for (uint i = 1; i < m_numParticles-1; i++) {
+        force_accumulator = make_vector(0.0f, -9.8f*mass, 0.0f);
         uint xind = i % side;
         uint yind = i / side;
-        float* cPos = &dPos[xind + yind * side];
-        float* cVel = &dVel[xind + yind * side];
-        float dist = 0.1f;
+        float* cPos = &dPos[(xind + yind * side)*4];
+        float* cVel = &dVel[(xind + yind * side)*4];
+        float dist = offset;
         if (xind > 0) {
-            float* nPos = &dPos[xind - 1 + yind * side];
-            float* nVel = &dVel[xind - 1 + yind * side];
+            float* nPos = &dPos[(xind - 1 + yind * side) * 4];
+            float* nVel = &dVel[(xind - 1 + yind * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (yind > 0) {
-            float* nPos = &dPos[xind + (yind-1) * side];
-            float* nVel = &dVel[xind + (yind-1) * side];
+            float* nPos = &dPos[(xind + (yind-1) * side) * 4];
+            float* nVel = &dVel[(xind + (yind-1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (xind < side - 1) {
-            float* nPos = &dPos[xind + 1 + yind * side];
-            float* nVel = &dVel[xind + 1 + yind * side];
+            float* nPos = &dPos[(xind + 1 + yind * side) * 4];
+            float* nVel = &dVel[(xind + 1 + yind * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (yind < side - 1) {
-            float* nPos = &dPos[xind + (yind + 1) * side];
-            float* nVel = &dVel[xind + (yind + 1) * side];
+            float* nPos = &dPos[(xind + (yind + 1) * side) * 4];
+            float* nVel = &dVel[(xind + (yind + 1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         dist *= sqrt(2);
 
         if (xind > 0 && yind > 0) {
-            float* nPos = &dPos[xind - 1 + (yind - 1) * side];
-            float* nVel = &dVel[xind - 1 + (yind - 1) * side];
+            float* nPos = &dPos[(xind - 1 + (yind - 1) * side) * 4];
+            float* nVel = &dVel[(xind - 1 + (yind - 1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (xind < side-1 && yind > 0) {
-            float* nPos = &dPos[xind + 1 + (yind - 1) * side];
-            float* nVel = &dVel[xind + 1 + (yind - 1) * side];
+            float* nPos = &dPos[(xind + 1 + (yind - 1) * side) * 4];
+            float* nVel = &dVel[(xind + 1 + (yind - 1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (xind > 0 && yind < side - 1) {
-            float* nPos = &dPos[xind - 1 + (yind + 1) * side];
-            float* nVel = &dVel[xind - 1 + (yind + 1) * side];
+            float* nPos = &dPos[(xind - 1 + (yind + 1) * side) * 4];
+            float* nVel = &dVel[(xind - 1 + (yind + 1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (xind < side - 1 && yind < side - 1) {
-            float* nPos = &dPos[xind + 1 + (yind + 1) * side];
-            float* nVel = &dVel[xind + 1 + (yind + 1) * side];
+            float* nPos = &dPos[(xind + 1 + (yind + 1) * side) * 4];
+            float* nVel = &dVel[(xind + 1 + (yind + 1) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         dist *= sqrt(2);
 
         if (xind > 1) {
-            float* nPos = &dPos[xind - 2 + yind * side];
-            float* nVel = &dVel[xind - 2 + yind * side];
+            float* nPos = &dPos[(xind - 2 + yind * side) * 4];
+            float* nVel = &dVel[(xind - 2 + yind * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (yind > 1) {
-            float* nPos = &dPos[xind + (yind - 2) * side];
-            float* nVel = &dVel[xind + (yind - 2) * side];
+            float* nPos = &dPos[(xind + (yind - 2) * side) * 4];
+            float* nVel = &dVel[(xind + (yind - 2) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (xind < side - 2) {
-            float* nPos = &dPos[xind + 2 + yind * side];
-            float* nVel = &dVel[xind + 2 + yind * side];
+            float* nPos = &dPos[(xind + 2 + yind * side) * 4];
+            float* nVel = &dVel[(xind + 2 + yind * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
 
         if (yind < side - 2) {
-            float* nPos = &dPos[xind + (yind + 2) * side];
-            float* nVel = &dVel[xind + (yind + 2) * side];
+            float* nPos = &dPos[(xind + (yind + 2) * side) * 4];
+            float* nVel = &dVel[(xind + (yind + 2) * side) * 4];
             force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
         }
         Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
         Vector3f vel = make_vector(cVel[0], cVel[1], cVel[2]);
-        pos += 0.01f * vel;
-        vel = 0.98f * pos + 0.01f * force_accumulator;
+        pos += dt * vel;
+        vel = damp * vel + dt * force_accumulator / mass;
         cPos[0] = pos.x;
-        cPos[1] = pos.y;
+        cPos[1] = std::max(-0.5f, pos.y);
         cPos[2] = pos.z;
         cVel[0] = vel.x;
         cVel[1] = vel.y;
@@ -345,7 +351,7 @@ ParticleSystem::update(float deltaTime)
     }
 
     
-    //setArray(POSITION, dPos, 0, m_numParticles);
+    setArray(POSITION, dPos, 0, m_numParticles);
     //setArray(VELOCITY, dVel, 0, m_numParticles);
     
     /*
@@ -594,13 +600,13 @@ ParticleSystem::reset(ParticleConfig config)
             {
                 float start_x = 0.f;
                 float start_y = 0.f;
-                float offset = 0.1f;
+                
                 int p = 0, v = 0;
                 uint side = sqrt(m_numParticles);
                 for (uint i = 0; i < m_numParticles; i++) {
                     uint xind = i % side;
                     uint yind = i / side;
-                    m_hPos[p++] = start_x + xind*offset;
+                    m_hPos[p++] = start_x + xind * offset;
                     m_hPos[p++] = 0.f;
                     m_hPos[p++] = start_y + yind * offset;
                     m_hPos[p++] = 1.0f; // radius

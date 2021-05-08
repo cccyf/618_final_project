@@ -189,6 +189,11 @@ class ParticleSystem
         uint3 m_gridSize;
         uint m_numGridCells;
 
+        float offset;
+        float dt;
+        float damp;
+        float mass;
+
         StopWatchInterface *m_timer;
 
         uint m_solverIterations;
