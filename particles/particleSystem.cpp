@@ -355,7 +355,7 @@ ParticleSystem::update(float deltaTime)
     }
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
-        parallel_sim(dPos, m_dVel, dt, m_numParticles, mass, dist, dt, damp);
+        parallel_sim(dPos, m_dVel, dt, m_numParticles, mass, offset, dt, damp);
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
     

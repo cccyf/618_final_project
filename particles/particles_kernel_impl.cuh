@@ -346,7 +346,7 @@ void compute_force(float4* p1, float4* p2, float4* v1, float4* v2, float m_dist,
     Eigen::Vector3f pos_diff = { p1->x - p2->x, p1->y - p2->y, p1->z - p2->z };
     Eigen::Vector3f vel_diff = { v1->x - v2->x, v1->y - v2->y, v1->z - v2->z };
     float dot_product = vel_diff.dot(pos_diff);
-    *res = -(m_ks * (pos_diff.norm() - m_dist) + m_kd * dot_product / pos_diff.norm()) * pos_diff / pos_diff.norm());
+    *res = -(m_ks * (pos_diff.norm() - m_dist) + m_kd * dot_product / pos_diff.norm()) * pos_diff / pos_diff.norm();
 }
 
 __global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sideLength, float mass, float offset, float dt, float damp) {
@@ -364,6 +364,10 @@ __global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sid
     }
 
     __syncthreads();
+    uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
+    uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
+
+    if (globalx >= sideLength || globaly >= sideLength) return;
 
     uint xind = threadIdx.x + 2, yind = threadIdx.y + 2;
     Eigen::Vector3f force_accumulator;
@@ -400,7 +404,7 @@ __global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sid
         force_accumulator += cur_force;
     }
 
-    dist *= sqrt(2);
+    dist *= sqrt(2.0f);
 
     if ((blockIdx.x > 0 || xind > 2) && (blockIdx.y > 0 || yind > 2)) {
         float4* nPos = &block_pos[xind - 1 + (yind - 1) * 12];
@@ -430,7 +434,7 @@ __global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sid
         force_accumulator += cur_force;
     }
 
-    dist *= sqrt(2);
+    dist *= sqrt(2.0f);
 
     if (blockIdx.x > 0 || xind > 3) {
         float4* nPos = &block_pos[xind - 2 + yind * 12];
@@ -463,14 +467,13 @@ __global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sid
     Eigen::Vector3f vVel = { cVel->x, cVel->y, cVel->z };
     vPos += dt * vVel;
     vVel = damp * vVel + dt * force_accumulator / mass;
-    uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
-    uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
-    pos[globalx + globaly * sideLength]  = vPos.x();
-    pos[globalx + globaly * sideLength + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
-    pos[globalx + globaly * sideLength + 2] = vPos.z();
-    vel[globalx + globaly * sideLength] = vVel.x();
-    vel[globalx + globaly * sideLength + 1] = vVel.y();
-    vel[globalx + globaly * sideLength + 2] = vVel.z();
+    uint start_ind = (globalx + globaly * sideLength) * 4;
+    pos[start_ind]  = vPos.x();
+    pos[start_ind + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
+    pos[start_ind + 2] = vPos.z();
+    vel[start_ind] = vVel.x();
+    vel[start_ind + 1] = vVel.y();
+    vel[start_ind + 2] = vVel.z();
 
 }
 
