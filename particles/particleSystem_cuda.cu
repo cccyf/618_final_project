@@ -242,13 +242,12 @@ extern "C"
         uint numParticles,
         float mass,
         float dist,
-        float dt,
         float damp) {
         dim3 blockDim(8,8);
         uint blockPerSide = iDivUp(sqrt(numParticles), blockDim.x);
         dim3 gridDim(blockPerSide, blockPerSide);
         uint sideLength = sqrt(numParticles);
-        parallel_kernel<<< gridDim, blockDim >>> (pos, vel, deltaTime, sideLength, mass, dist, dt, damp);
+        parallel_kernel<<< gridDim, blockDim >>> (pos, vel, deltaTime, sideLength, mass, dist, damp);
     }
 
 

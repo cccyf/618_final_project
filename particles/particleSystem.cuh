@@ -66,7 +66,6 @@ extern "C"
         uint numParticles,
         float mass,
         float dist,
-        float dt,
         float damp);
 
 }
