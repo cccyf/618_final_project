@@ -23,6 +23,8 @@
 #include <cstdio>
 #include <string.h>
 
+#include <device_launch_parameters.h>
+
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
@@ -233,5 +235,22 @@ extern "C"
                             thrust::device_ptr<uint>(dGridParticleHash + numParticles),
                             thrust::device_ptr<uint>(dGridParticleIndex));
     }
+
+    void parallel_sim(float* pos,
+        float* vel,
+        float deltaTime,
+        uint numParticles,
+        float mass,
+        float dist,
+        float dt,
+        float damp) {
+        dim3 blockDim(8,8);
+        uint blockPerSide = iDivUp(sqrt(numParticles), blockDim.x);
+        dim3 gridDim(blockPerSide, blockPerSide);
+        uint sideLength = sqrt(numParticles);
+        parallel_kernel<<< gridDim, blockDim >>> (pos, vel, deltaTime, sideLength, mass, dist, dt, damp);
+    }
+
+
 
 }   // extern "C"

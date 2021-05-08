@@ -25,6 +25,10 @@ namespace cg = cooperative_groups;
 #include "math_constants.h"
 #include "particles_kernel.cuh"
 
+#include "Vector.hpp"
+#include <cuda.h>
+#include <device_functions.h>
+
 // simulation parameters in constant memory
 __constant__ SimParams params;
 
@@ -332,6 +336,140 @@ void collideD(float4 *newVel,               // output: new velocity
     // write new velocity back to original unsorted location
     uint originalIndex = gridParticleIndex[index];
     newVel[originalIndex] = make_float4(vel + force, 0.0f);
+}
+
+
+__device__ __inline__
+void compute_force(float4* p1, float4* p2, float4* v1, float4* v2, float m_dist, Vector3f* res) {
+    float m_ks = 50.f;
+    float m_kd = 0.98f;
+    Vector3f pos_diff = make_vector(p1->x-p2->x, p1->y - p2->y, p1->z - p2->z);
+    *res = -(m_ks * (length(pos_diff) - m_dist) + m_kd * (make_vector(v1->x - v2->x, v1->y - v2->y, v1->z - v2->z) * pos_diff) / length(pos_diff)) * pos_diff / length(pos_diff);
+}
+
+__global__ void parallel_kernel(float* pos, float* vel, uint deltaTime, uint sideLength, float mass, float offset, float dt, float damp) {
+    __shared__ float4 block_pos[144];
+    __shared__ float4 block_vel[144];
+    uint xstart = blockIdx.x * blockDim.x - 2, ystart = blockIdx.y * blockDim.y - 2;
+    uint threadInd = threadIdx.y * blockDim.x + threadIdx.x;
+    for (uint i = threadInd; i < 144; i += blockDim.x * blockDim.y) {
+        uint x = xstart + i % 12;
+        uint y = ystart + i / 12;
+        x = x > 0 ? (x < sideLength - 1 ? x : sideLength - 1) : 0;
+        y = y > 0 ? (y < sideLength - 1 ? y : sideLength - 1) : 0;
+        block_pos[i] = *(float4*)&pos[4 * (x + y * sideLength)];
+        block_vel[i] = *(float4*)&vel[4 * (x + y * sideLength)];
+    }
+
+    __syncthreads();
+
+    uint xind = threadIdx.x + 2, yind = threadIdx.y + 2;
+    Vector3f force_accumulator;
+    Vector3f cur_force;
+    force_accumulator = make_vector(0.0f, -9.8f * mass, 0.0f);
+    float4* cPos = &block_pos[xind + yind * sideLength];
+    float4* cVel = &block_vel[xind + yind * sideLength];
+    float dist = offset;
+    if (blockIdx.x > 0 && xind > 2) {
+        float4* nPos = &block_pos[xind - 1 + yind * sideLength];
+        float4* nVel = &block_vel[xind - 1 + yind * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.y > 0 && yind > 2) {
+        float4* nPos = &block_pos[xind + (yind-1) * sideLength];
+        float4* nVel = &block_vel[xind + (yind-1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.x < gridDim.x - 1 && xind < blockDim.x+3) {
+        float4* nPos = &block_pos[xind + 1 + yind * sideLength];
+        float4* nVel = &block_vel[xind + 1 + yind * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.y < gridDim.y - 1 && yind < blockDim.y + 3) {
+        float4* nPos = &block_pos[xind + (yind + 1) * sideLength];
+        float4* nVel = &block_vel[xind + (yind + 1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    dist *= sqrt(2);
+
+    if (blockIdx.x > 0 && xind > 2 && blockIdx.y > 0 && yind > 2) {
+        float4* nPos = &block_pos[xind - 1 + (yind - 1) * sideLength];
+        float4* nVel = &block_vel[xind - 1 + (yind - 1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.x < gridDim.x - 1 && blockIdx.y > 0 && yind > 2) {
+        float4* nPos = &block_pos[xind + 1 + (yind - 1) * sideLength];
+        float4* nVel = &block_vel[xind + 1 + (yind - 1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.x > 0 && xind > 2 && blockIdx.y < gridDim.y - 1 && yind < blockDim.y + 3) {
+        float4* nPos = &block_pos[xind - 1 + (yind + 1) * sideLength];
+        float4* nVel = &block_vel[xind - 1 + (yind + 1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.x < gridDim.x - 1 && blockIdx.y < gridDim.y - 1 && yind < blockDim.y + 3) {
+        float4* nPos = &block_pos[xind + 1 + (yind + 1) * sideLength];
+        float4* nVel = &block_vel[xind + 1 + (yind + 1) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    dist *= sqrt(2);
+
+    if (blockIdx.x > 0 && xind > 3) {
+        float4* nPos = &block_pos[xind - 2 + yind * sideLength];
+        float4* nVel = &block_vel[xind - 2 + yind * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.y > 0 && yind > 3) {
+        float4* nPos = &block_pos[xind + (yind - 2) * sideLength];
+        float4* nVel = &block_vel[xind + (yind - 2) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.x < gridDim.x - 1 && xind < blockDim.x + 2) {
+        float4* nPos = &block_pos[xind + 2 + yind * sideLength];
+        float4* nVel = &block_vel[xind + 2 + yind * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+
+    if (blockIdx.y < gridDim.y - 1 && yind < blockDim.y + 2) {
+        float4* nPos = &block_pos[xind + (yind + 2) * sideLength];
+        float4* nVel = &block_vel[xind + (yind + 2) * sideLength];
+        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+        force_accumulator += cur_force;
+    }
+    Vector3f vPos = make_vector(cPos->x, cPos->y, cPos->z);
+    Vector3f vVel = make_vector(cVel->x, cVel->y, cVel->z);
+    vPos += dt * vVel;
+    vVel = damp * vVel + dt * force_accumulator / mass;
+    uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
+    uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
+    pos[globalx + globaly * sideLength]  = vPos.x;
+    pos[globalx + globaly * sideLength + 1] = vPos.y > -0.5f ? vPos.y : -0.5f;
+    pos[globalx + globaly * sideLength + 2] = vPos.z;
+    vel[globalx + globaly * sideLength] = vVel.x;
+    vel[globalx + globaly * sideLength + 1] = vVel.y;
+    vel[globalx + globaly * sideLength + 2] = vVel.z;
+
 }
 
 #endif

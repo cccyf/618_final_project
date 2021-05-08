@@ -60,4 +60,13 @@ extern "C"
 
     void sortParticles(uint *dGridParticleHash, uint *dGridParticleIndex, uint numParticles);
 
+    void parallel_sim(float* pos,
+        float* vel,
+        float deltaTime,
+        uint numParticles,
+        float mass,
+        float dist,
+        float dt,
+        float damp);
+
 }
