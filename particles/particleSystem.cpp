@@ -247,15 +247,36 @@ Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v
     return force;
 }
 
+bool is_neighbor(uint ind1, int ind2, uint side) {
+	if (ind1 > ind2) {
+		uint t = ind1;
+		ind1 = ind2;
+		ind2 = t;
+	}
+	uint diff = ind2 - ind1;
+	if (diff == 1 || diff == 2 || diff == side || diff == 2 * side || diff == side - 1 || diff == side + 1) {
+    	return true;
+	}
+
+	return false;
+}
+
+bool check_collision(float* p1, float*p2, float dist) {
+	Vector3f pos_diff = make_vector(p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]);
+	return length(pos_diff) < dist;
+}
+
 // step the simulation
 void
 ParticleSystem::update(float deltaTime)
 {   
     //afloat* dPos = getArray(POSITION);
-    bool seq = false;
+    bool seq = true;
     if (seq) {
         float* dPos = m_hPos;
         float* dVel = m_hVel;
+		float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
+		memcpy(prevPos, dPos, 4 * m_numParticles * sizeof(float));
         uint side = sqrt(m_numParticles);
         Vector3f force_accumulator;
         for (uint i = 1; i < m_numParticles - 1; i++) {
@@ -345,12 +366,34 @@ ParticleSystem::update(float deltaTime)
             pos += dt * vel;
             vel = damp * vel + dt * force_accumulator / mass;
             cPos[0] = pos.x;
-            cPos[1] = std::max(-0.5f, pos.y);
+            cPos[1] = std::max(-10.f, pos.y);
             cPos[2] = pos.z;
             cVel[0] = vel.x;
             cVel[1] = vel.y;
             cVel[2] = vel.z;
         }
+
+		for (uint i = 0; i < m_numParticles; i++) {
+			for (uint j = 0; j < m_numParticles; j++) {
+				if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4*i], &dPos[4*j], offset))) {
+					continue;
+				}
+				
+				// reset position
+				memcpy(&dPos[4 * i], &prevPos[4 * i], 4*sizeof(float));
+				memcpy(&dPos[4 * j], &prevPos[4 * j], 4*sizeof(float));
+				// reset velocity
+				dVel[4 * i] = 0.f;
+				dVel[4 * i + 1] = 0.f;
+				dVel[4 * i + 2] = 0.f;
+				dVel[4 * j] = 0.f;
+				dVel[4 * j + 1] = 0.f;
+				dVel[4 * j + 2] = 0.f;
+			}
+
+		}
+		delete prevPos;
+
         setArray(POSITION, dPos, 0, m_numParticles);
     }
     else {
