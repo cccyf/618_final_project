@@ -608,8 +608,8 @@ ParticleSystem::reset(ParticleConfig config)
 
         case CONFIG_CLOTH:
             {
-                float start_x = 0.f;
-                float start_y = 0.f;
+                float start_x = -1.f;
+                float start_y = -1.f;
                 
                 int p = 0, v = 0;
                 uint side = sqrt(m_numParticles);

@@ -117,7 +117,7 @@ unsigned int frameCount = 0;
 unsigned int g_TotalErrors = 0;
 char        *g_refFile = NULL;
 
-const char *sSDKsample = "CUDA Particles Simulation";
+const char *sSDKsample = "CUDA Cloth Simulation";
 
 extern "C" void cudaInit(int argc, char **argv);
 extern "C" void cudaGLInit(int argc, char **argv);
@@ -156,7 +156,7 @@ void initGL(int *argc, char **argv)
     glutInit(argc, argv);
     glutInitDisplayMode(GLUT_RGB | GLUT_DEPTH | GLUT_DOUBLE);
     glutInitWindowSize(width, height);
-    glutCreateWindow("CUDA Particles");
+    glutCreateWindow("CUDA Cloth");
 
     if (!isGLVersionSupported(2,0) ||
         !areGLExtensionsSupported("GL_ARB_multitexture GL_ARB_vertex_buffer_object"))
@@ -278,16 +278,16 @@ void display()
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
 
     // cube
-    glColor3f(1.0, 1.0, 1.0);
-    glutWireCube(2.0);
+    //glColor3f(1.0, 1.0, 1.0);
+    //glutWireCube(2.0);
 
     // collider
-    glPushMatrix();
-    float3 p = psystem->getColliderPos();
-    glTranslatef(p.x, p.y, p.z);
-    glColor3f(1.0, 0.0, 0.0);
-    glutSolidSphere(psystem->getColliderRadius(), 20, 10);
-    glPopMatrix();
+    //glPushMatrix();
+    //float3 p = psystem->getColliderPos();
+    //glTranslatef(p.x, p.y, p.z);
+    //glColor3f(1.0, 0.0, 0.0);
+    //glutSolidSphere(psystem->getColliderRadius(), 20, 10);
+    //glPopMatrix();
 
     if (renderer && displayEnabled)
     {
@@ -665,7 +665,7 @@ void initParams()
 
 void mainMenu(int i)
 {
-    key((unsigned char) i, 0, 0);
+   // key((unsigned char) i, 0, 0);
 }
 
 void initMenus()
