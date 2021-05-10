@@ -518,13 +518,22 @@ __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint si
     vPos += deltaTime * vVel;
     vVel = damp * vVel + deltaTime * force_accumulator / mass;
     uint start_ind = (globalx + globaly * sideLength) * 4;
-    pos[start_ind]  = vPos.x();
-    //pos[start_ind + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
-    pos[start_ind + 1] = vPos.y();
-    pos[start_ind + 2] = vPos.z();
-    vel[start_ind] = vVel.x();
-    vel[start_ind + 1] = vVel.y();
-    vel[start_ind + 2] = vVel.z();
+    Eigen::Vector3f collider_pos = { params.colliderPos.x, params.colliderPos.y, params.colliderPos.z };
+    if ((vPos - collider_pos).norm() > params.colliderRadius) {
+        pos[start_ind] = vPos.x();
+        //pos[start_ind + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
+        pos[start_ind + 1] = vPos.y();
+        pos[start_ind + 2] = vPos.z();
+        vel[start_ind] = vVel.x();
+        vel[start_ind + 1] = vVel.y();
+        vel[start_ind + 2] = vVel.z();
+    }
+    else {
+        vel[start_ind] = 0.f;
+        vel[start_ind + 1] = 0.f;
+        vel[start_ind + 2] = 0.f;
+    }
+    
     /*
 
     for (uint i = 0; i < sideLength*sideLength; i++) {
