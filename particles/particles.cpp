@@ -63,8 +63,10 @@ const uint width = 640, height = 480;
 // view params
 int ox, oy;
 int buttonState = 0;
-float camera_trans[] = {0, 0, -3};
-float camera_rot[]   = {0, 0, 0};
+//float camera_trans[] = {0, 0, -3};
+//float camera_rot[]   = {0, 0, 0};
+float camera_trans[] = { -1.5f, 1.5f, -8.0f };
+float camera_rot[] = { 30, 0, 0 };
 float camera_trans_lag[] = {0, 0, -3};
 float camera_rot_lag[] = {0, 0, 0};
 const float inertia = 0.1f;
@@ -251,7 +253,6 @@ void display()
         psystem->setCollideAttraction(collideAttraction);
 
         psystem->update(timestep);
-
         if (renderer)
         {
             renderer->setVertexBuffer(psystem->getCurrentReadBuffer(), psystem->getNumParticles());
@@ -452,7 +453,7 @@ void motion(int x, int y)
                 camera_rot[0] += dy / 5.0f;
                 camera_rot[1] += dx / 5.0f;
             }
-
+            std::cout << camera_trans[0] << " " << camera_trans[1] << " " << camera_trans[2] << std::endl;
             break;
 
         case M_MOVE:
