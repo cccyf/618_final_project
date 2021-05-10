@@ -56,7 +56,7 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     m_params.numCells = m_numGridCells;
     m_params.numBodies = m_numParticles;
 
-    m_params.particleRadius = 1.0f / 64.0f;
+    m_params.particleRadius = 0.02f;
     m_params.colliderPos = make_float3(-1.2f, -0.8f, 0.8f);
     m_params.colliderRadius = 0.2f;
 
@@ -271,7 +271,7 @@ void
 ParticleSystem::update(float deltaTime)
 {   
     //afloat* dPos = getArray(POSITION);
-    bool seq = true;
+    bool seq = false;
     if (seq) {
         float* dPos = m_hPos;
         float* dVel = m_hVel;
@@ -398,7 +398,34 @@ ParticleSystem::update(float deltaTime)
     }
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
+        setParameters(&m_params);
         parallel_sim(dPos, m_dVel, dt, m_numParticles, mass, offset, damp);
+        calcHash(
+            m_dGridParticleHash,
+            m_dGridParticleIndex,
+            dPos,
+            m_numParticles);
+        sortParticles(m_dGridParticleHash, m_dGridParticleIndex, m_numParticles);
+        reorderDataAndFindCellStart(
+            m_dCellStart,
+            m_dCellEnd,
+            m_dSortedPos,
+            m_dSortedVel,
+            m_dGridParticleHash,
+            m_dGridParticleIndex,
+            dPos,
+            m_dVel,
+            m_numParticles,
+            m_numGridCells);
+        collide(
+            m_dVel,
+            m_dSortedPos,
+            m_dSortedVel,
+            m_dGridParticleIndex,
+            m_dCellStart,
+            m_dCellEnd,
+            m_numParticles,
+            m_numGridCells);
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
     

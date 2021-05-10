@@ -217,7 +217,7 @@ void reorderDataAndFindCellStartD(uint   *cellStart,        // output: cell star
 
 // collide two spheres using DEM method
 __device__
-float3 collideSpheres(float3 posA, float3 posB,
+bool collideSpheres(float3 posA, float3 posB,
                       float3 velA, float3 velB,
                       float radiusA, float radiusB,
                       float attraction)
@@ -232,6 +232,8 @@ float3 collideSpheres(float3 posA, float3 posB,
 
     if (dist < collideDist)
     {
+        //printf("%f %f\n", dist, collideDist);
+        return true;
         float3 norm = relPos / dist;
 
         // relative velocity
@@ -250,14 +252,30 @@ float3 collideSpheres(float3 posA, float3 posB,
         force += attraction*relPos;
     }
 
-    return force;
+    return false;
 }
 
+__device__ __inline__
+bool is_neighbor(int gx, int gy, int ix, int iy) {
+    /*
+    if (ind1 > ind2) {
+        uint t = ind1;
+        ind1 = ind2;
+        ind2 = t;
+    }
+    uint diff = ind2 - ind1;
+    if (diff == 1 || diff == 2 || diff == side || diff == 2 * side || diff == side - 1 || diff == side + 1) {
+        return true;
+    }
+    */
+    if (abs(gx - ix) + abs(gy - iy) <= 2) return true;
 
+    return false;
+}
 
 // collide a particle against all other particles in a given cell
 __device__
-float3 collideCell(int3    gridPos,
+bool collideCell(int3    gridPos,
                    uint    index,
                    float3  pos,
                    float3  vel,
@@ -273,6 +291,8 @@ float3 collideCell(int3    gridPos,
 
     float3 force = make_float3(0.0f);
 
+    uint sideLength = sqrt((float)params.numBodies);
+
     if (startIndex != 0xffffffff)          // cell is not empty
     {
         // iterate over particles in this cell
@@ -280,18 +300,20 @@ float3 collideCell(int3    gridPos,
 
         for (uint j=startIndex; j<endIndex; j++)
         {
-            if (j != index)                // check not colliding with self
+            if (!is_neighbor(index%sideLength, index/sideLength, j%sideLength, j/sideLength))                // check not colliding with self
             {
+                
                 float3 pos2 = make_float3(oldPos[j]);
                 float3 vel2 = make_float3(oldVel[j]);
 
                 // collide two spheres
-                force += collideSpheres(pos, pos2, vel, vel2, params.particleRadius, params.particleRadius, params.attraction);
+                if (collideSpheres(pos, pos2, vel, vel2, params.particleRadius, params.particleRadius, params.attraction))
+                    return true;
             }
         }
     }
 
-    return force;
+    return false;
 }
 
 
@@ -318,6 +340,7 @@ void collideD(float4 *newVel,               // output: new velocity
     // examine neighbouring cells
     float3 force = make_float3(0.0f);
 
+    bool collide = false;
     for (int z=-1; z<=1; z++)
     {
         for (int y=-1; y<=1; y++)
@@ -325,17 +348,23 @@ void collideD(float4 *newVel,               // output: new velocity
             for (int x=-1; x<=1; x++)
             {
                 int3 neighbourPos = gridPos + make_int3(x, y, z);
-                force += collideCell(neighbourPos, index, pos, vel, oldPos, oldVel, cellStart, cellEnd);
+                if (collideCell(neighbourPos, index, pos, vel, oldPos, oldVel, cellStart, cellEnd))
+                    collide = true;
             }
         }
     }
-
+    
     // collide with cursor sphere
-    force += collideSpheres(pos, params.colliderPos, vel, make_float3(0.0f, 0.0f, 0.0f), params.particleRadius, params.colliderRadius, 0.0f);
-
-    // write new velocity back to original unsorted location
-    uint originalIndex = gridParticleIndex[index];
-    newVel[originalIndex] = make_float4(vel + force, 0.0f);
+    // force += collideSpheres(pos, params.colliderPos, vel, make_float3(0.0f, 0.0f, 0.0f), params.particleRadius, params.colliderRadius, 0.0f);
+    if (collide) {
+        printf("collide\n");
+        // write new velocity back to original unsorted location
+        uint originalIndex = gridParticleIndex[index];
+        //newVel[originalIndex] = make_float4(vel + force, 0.0f);
+        newVel[originalIndex] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    
+    
 }
 
 
@@ -350,9 +379,19 @@ void compute_force(float4* p1, float4* p2, float4* v1, float4* v2, float m_dist,
     //printf("%f %f\n", res->norm(), pos_diff.norm());
 }
 
+
+
+__device__ __inline__
+bool check_collision(float* p1, float* p2, float dist) {
+    Eigen::Vector3f pos_diff = { p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2] };
+    return pos_diff.norm() < dist;
+}
+
 __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
     __shared__ float4 block_pos[144];
     __shared__ float4 block_vel[144];
+    //__shared__ float all_pos[10000*4];
+
     uint xstart = blockIdx.x * blockDim.x - 2, ystart = blockIdx.y * blockDim.y - 2;
     uint threadInd = threadIdx.y * blockDim.x + threadIdx.x;
     for (uint i = threadInd; i < 144; i += blockDim.x * blockDim.y) {
@@ -363,8 +402,15 @@ __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint si
         block_pos[i] = *(float4*)&pos[4 * (x + y * sideLength)];
         block_vel[i] = *(float4*)&vel[4 * (x + y * sideLength)];
     }
-
+    /*
+    for (uint i = threadInd; i < 10000; i += blockDim.x * blockDim.y) {
+        for (uint j = 0; j < 4; j++) {
+            all_pos[4*i+j] = pos[4 * i + j];
+        }
+    }
+    */
     __syncthreads();
+
     uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
     uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
     if ((globalx == 0 && globaly == 0) || (globalx == sideLength - 1 && globaly == sideLength - 1)) return;
@@ -479,7 +525,24 @@ __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint si
     vel[start_ind] = vVel.x();
     vel[start_ind + 1] = vVel.y();
     vel[start_ind + 2] = vVel.z();
+    /*
 
+    for (uint i = 0; i < sideLength*sideLength; i++) {
+        uint ix = i % sideLength;
+        uint iy = i / sideLength;
+        if (is_neighbor(globalx, globaly, ix, iy) || !(check_collision(&pos[start_ind], &all_pos[i], offset))) {
+            continue;
+        }
+
+        // reset position
+        memcpy(&pos[start_ind], &all_pos[start_ind], 4 * sizeof(float));
+        // reset velocity
+        vel[start_ind] = 0.f;
+        vel[start_ind + 1] = 0.f;
+        vel[start_ind + 2] = 0.f;
+        break;
+    }
+    */
 }
 
 #endif

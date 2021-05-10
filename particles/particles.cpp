@@ -453,7 +453,7 @@ void motion(int x, int y)
                 camera_rot[0] += dy / 5.0f;
                 camera_rot[1] += dx / 5.0f;
             }
-            std::cout << camera_trans[0] << " " << camera_trans[1] << " " << camera_trans[2] << std::endl;
+
             break;
 
         case M_MOVE:
