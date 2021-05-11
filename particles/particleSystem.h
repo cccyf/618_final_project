@@ -163,7 +163,7 @@ class ParticleSystem
         // GPU data
         float *m_dPos;
         float *m_dVel;
-
+        float *m_prevPos;
         float *m_dSortedPos;
         float *m_dSortedVel;
 

@@ -55,8 +55,8 @@
 #define MAX_EPSILON_ERROR 5.00f
 #define THRESHOLD         0.30f
 
-#define GRID_SIZE       64
-#define NUM_PARTICLES   10000
+#define GRID_SIZE       256
+#define NUM_PARTICLES   65536
 
 const uint width = 640, height = 480;
 
@@ -227,7 +227,7 @@ void computeFPS()
     {
         char fps[256];
         float ifps = 1.f / (sdkGetAverageTimerValue(&timer) / 1000.f);
-        sprintf(fps, "CUDA Particles (%d particles): %3.1f fps", numParticles, ifps);
+        sprintf(fps, "CUDA Particles (%d particles): %3.3f fps", numParticles, ifps);
 
         glutSetWindowTitle(fps);
         fpsCount = 0;

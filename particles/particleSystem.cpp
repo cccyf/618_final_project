@@ -34,6 +34,9 @@
 #define CUDART_PI_F         3.141592654f
 #endif
 
+StopWatchInterface* integrate_t = NULL;
+StopWatchInterface* collide_t = NULL;
+
 ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenGL) :
     m_bInitialized(false),
     m_bUseOpenGL(bUseOpenGL),
@@ -56,7 +59,7 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     m_params.numCells = m_numGridCells;
     m_params.numBodies = m_numParticles;
 
-    m_params.particleRadius = 0.02f;
+    m_params.particleRadius = 0.025f;
     m_params.colliderPos = make_float3(1.5f, -0.25f, 1.5f);
     m_params.colliderRadius = 0.2f;
 
@@ -74,11 +77,13 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     m_params.gravity = make_float3(0.0f, -0.0003f, 0.0f);
     m_params.globalDamping = 1.0f;
 
-    dt = 0.001f;
+    dt = 0.01f;
     offset = 0.05f;
     damp = 0.98f;
-    mass = 100.f / m_numParticles;
+    mass = 1.f;
 
+    sdkCreateTimer(&integrate_t);
+    sdkCreateTimer(&collide_t);
 
     _initialize(numParticles);
 }
@@ -155,6 +160,7 @@ ParticleSystem::_initialize(int numParticles)
         checkCudaErrors(cudaMalloc((void **)&m_cudaPosVBO, memSize)) ;
     }
 
+    allocateArray((void **)&m_prevPos, memSize);
     allocateArray((void **)&m_dVel, memSize);
 
     allocateArray((void **)&m_dSortedPos, memSize);
@@ -247,8 +253,10 @@ Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v
     return force;
 }
 
-bool is_neighbor(uint ind1, int ind2, uint side) {
-	if (ind1 > ind2) {
+bool is_neighbor(uint ind1, uint ind2, uint side) {
+	/*
+    
+    if (ind1 > ind2) {
 		uint t = ind1;
 		ind1 = ind2;
 		ind2 = t;
@@ -257,8 +265,13 @@ bool is_neighbor(uint ind1, int ind2, uint side) {
 	if (diff == 1 || diff == 2 || diff == side || diff == 2 * side || diff == side - 1 || diff == side + 1) {
     	return true;
 	}
+    */
+    int x1 = ind1 % side;
+    int y1 = ind1 / side;
+    int x2 = ind2 % side;
+    int y2 = ind2 / side;
 
-	return false;
+    return (abs(x1 - x2) + abs(y1 - y2) <= 2);
 }
 
 bool check_collision(float* p1, float*p2, float dist) {
@@ -273,6 +286,7 @@ ParticleSystem::update(float deltaTime)
     //afloat* dPos = getArray(POSITION);
     bool seq = false;
     if (seq) {
+        sdkStartTimer(&integrate_t);
         float* dPos = m_hPos;
         float* dVel = m_hVel;
 		float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
@@ -372,7 +386,8 @@ ParticleSystem::update(float deltaTime)
             cVel[1] = vel.y;
             cVel[2] = vel.z;
         }
-
+        sdkStopTimer(&integrate_t);
+        sdkStartTimer(&collide_t);
 		for (uint i = 0; i < m_numParticles; i++) {
 			for (uint j = 0; j < m_numParticles; j++) {
 				if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4*i], &dPos[4*j], offset))) {
@@ -393,13 +408,17 @@ ParticleSystem::update(float deltaTime)
 
 		}
 		delete prevPos;
-
+        sdkStopTimer(&collide_t);
         setArray(POSITION, dPos, 0, m_numParticles);
+        
     }
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
         setParameters(&m_params);
-        parallel_sim(dPos, m_dVel, dt, m_numParticles, mass, offset, damp);
+        sdkStartTimer(&integrate_t);
+        parallel_sim(m_prevPos, dPos, m_dVel, dt, m_numParticles, mass, offset, damp);
+        sdkStopTimer(&integrate_t);
+        sdkStartTimer(&collide_t);
         calcHash(
             m_dGridParticleHash,
             m_dGridParticleIndex,
@@ -418,6 +437,8 @@ ParticleSystem::update(float deltaTime)
             m_numParticles,
             m_numGridCells);
         collide(
+            m_prevPos,
+            dPos,
             m_dVel,
             m_dSortedPos,
             m_dSortedVel,
@@ -426,6 +447,7 @@ ParticleSystem::update(float deltaTime)
             m_dCellEnd,
             m_numParticles,
             m_numGridCells);
+        sdkStopTimer(&collide_t);
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
     
@@ -501,7 +523,7 @@ ParticleSystem::update(float deltaTime)
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
     */
-    
+    //printf("integration time: %.3f; collide time: %.3f\n", sdkGetAverageTimerValue(&integrate_t), sdkGetAverageTimerValue(&collide_t));
 }
 
 void

@@ -217,7 +217,7 @@ void reorderDataAndFindCellStartD(uint   *cellStart,        // output: cell star
 
 // collide two spheres using DEM method
 __device__
-bool collideSpheres(float3 posA, float3 posB,
+float3 collideSpheres(float3 posA, float3 posB,
                       float3 velA, float3 velB,
                       float radiusA, float radiusB,
                       float attraction)
@@ -232,8 +232,8 @@ bool collideSpheres(float3 posA, float3 posB,
 
     if (dist < collideDist)
     {
+        
         //printf("%f %f\n", dist, collideDist);
-        return true;
         float3 norm = relPos / dist;
 
         // relative velocity
@@ -252,7 +252,7 @@ bool collideSpheres(float3 posA, float3 posB,
         force += attraction*relPos;
     }
 
-    return false;
+    return force;
 }
 
 __device__ __inline__
@@ -275,14 +275,15 @@ bool is_neighbor(int gx, int gy, int ix, int iy) {
 
 // collide a particle against all other particles in a given cell
 __device__
-bool collideCell(int3    gridPos,
+float3 collideCell(int3    gridPos,
                    uint    index,
                    float3  pos,
                    float3  vel,
                    float4 *oldPos,
                    float4 *oldVel,
                    uint   *cellStart,
-                   uint   *cellEnd)
+                   uint   *cellEnd,
+                   uint   *gridParticleIndex)
 {
     uint gridHash = calcGridHash(gridPos);
 
@@ -297,28 +298,31 @@ bool collideCell(int3    gridPos,
     {
         // iterate over particles in this cell
         uint endIndex = cellEnd[gridHash];
-
+        uint oind1 = gridParticleIndex[index];
         for (uint j=startIndex; j<endIndex; j++)
         {
-            if (!is_neighbor(index%sideLength, index/sideLength, j%sideLength, j/sideLength))                // check not colliding with self
+            uint oind2 = gridParticleIndex[j];
+            if (!is_neighbor(oind1%sideLength, oind1 /sideLength, oind2 %sideLength, oind2 /sideLength))                // check not colliding with self
             {
                 
                 float3 pos2 = make_float3(oldPos[j]);
                 float3 vel2 = make_float3(oldVel[j]);
 
                 // collide two spheres
-                if (collideSpheres(pos, pos2, vel, vel2, params.particleRadius, params.particleRadius, params.attraction))
-                    return true;
+                force += collideSpheres(pos, pos2, vel, vel2, params.particleRadius, params.particleRadius, params.attraction);
+                    
             }
         }
     }
 
-    return false;
+    return force;
 }
 
 
 __global__
-void collideD(float4 *newVel,               // output: new velocity
+void collideD(float4 *prevPos,
+              float4 *newPos,
+              float4 *newVel,               // output: new velocity
               float4 *oldPos,               // input: sorted positions
               float4 *oldVel,               // input: sorted velocities
               uint   *gridParticleIndex,    // input: sorted particle indices
@@ -340,7 +344,7 @@ void collideD(float4 *newVel,               // output: new velocity
     // examine neighbouring cells
     float3 force = make_float3(0.0f);
 
-    bool collide = false;
+    //bool collide = false;
     for (int z=-1; z<=1; z++)
     {
         for (int y=-1; y<=1; y++)
@@ -348,21 +352,23 @@ void collideD(float4 *newVel,               // output: new velocity
             for (int x=-1; x<=1; x++)
             {
                 int3 neighbourPos = gridPos + make_int3(x, y, z);
-                if (collideCell(neighbourPos, index, pos, vel, oldPos, oldVel, cellStart, cellEnd))
-                    collide = true;
+                force += collideCell(neighbourPos, index, pos, vel, oldPos, oldVel, cellStart, cellEnd, gridParticleIndex);
             }
+
         }
+
     }
     
     // collide with cursor sphere
     // force += collideSpheres(pos, params.colliderPos, vel, make_float3(0.0f, 0.0f, 0.0f), params.particleRadius, params.colliderRadius, 0.0f);
-    if (collide) {
-        printf("collide\n");
+    //if (collide) {
+        //printf("collide\n");
         // write new velocity back to original unsorted location
         uint originalIndex = gridParticleIndex[index];
-        //newVel[originalIndex] = make_float4(vel + force, 0.0f);
-        newVel[originalIndex] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-    }
+        newVel[originalIndex] = make_float4(vel + force * 0.01f, 0.0f);
+        //newVel[originalIndex] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        //newPos[originalIndex] = prevPos[originalIndex];
+    //}
     
     
 }
@@ -379,6 +385,12 @@ void compute_force(float4* p1, float4* p2, float4* v1, float4* v2, float m_dist,
     //printf("%f %f\n", res->norm(), pos_diff.norm());
 }
 
+//Round a / b to nearest higher integer value
+__device__ __inline__
+uint iDiv(uint a, uint b)
+{
+    return (a % b != 0) ? (a / b + 1) : (a / b);
+}
 
 
 __device__ __inline__
@@ -387,7 +399,7 @@ bool check_collision(float* p1, float* p2, float dist) {
     return pos_diff.norm() < dist;
 }
 
-__global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
+__global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
     __shared__ float4 block_pos[144];
     __shared__ float4 block_vel[144];
     //__shared__ float all_pos[10000*4];
@@ -403,6 +415,16 @@ __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint si
         block_vel[i] = *(float4*)&vel[4 * (x + y * sideLength)];
     }
     /*
+    uint numThreads = blockDim.x * blockDim.y * gridDim.x * gridDim.y;
+    uint blockInd = gridDim.x * blockIdx.y + blockIdx.x;
+    uint tid = threadInd + blockInd * blockDim.x * blockDim.y;
+    uint copyPerThread = iDiv(sideLength * sideLength * 4, numThreads);
+        printf("copy per thread %d\n", copyPerThread);
+    for (uint i = 0; i < copyPerThread; i++) {
+        prevPos[i + copyPerThread * tid] = pos[i + copyPerThread * tid];
+    }
+    */
+    /*
     for (uint i = threadInd; i < 10000; i += blockDim.x * blockDim.y) {
         for (uint j = 0; j < 4; j++) {
             all_pos[4*i+j] = pos[4 * i + j];
@@ -413,13 +435,19 @@ __global__ void parallel_kernel(float* pos, float* vel, float deltaTime, uint si
 
     uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
     uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
-    if ((globalx == 0 && globaly == 0) || (globalx == sideLength - 1 && globaly == sideLength - 1)) return;
     if (globalx >= sideLength || globaly >= sideLength) return;
+    for (uint i = 0; i < 4; i++) {
+        prevPos[globaly * sideLength + globalx + i] = pos[globaly * sideLength + globalx + i];
+    }
+    
+
+    if ((globalx == 0 && globaly == 0) || (globalx == sideLength - 1 && globaly == sideLength - 1)) return;
+    
 
     uint xind = threadIdx.x + 2, yind = threadIdx.y + 2;
     Eigen::Vector3f force_accumulator;
     Eigen::Vector3f cur_force;
-    force_accumulator = { 0.0f, -9.8f * mass, 0.0f };
+    force_accumulator = { 0.0f, -0.098f * mass, 0.0f };
     float4* cPos = &block_pos[xind + yind * 12];
     float4* cVel = &block_vel[xind + yind * 12];
     float dist = offset;

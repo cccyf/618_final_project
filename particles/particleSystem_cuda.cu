@@ -200,7 +200,9 @@ extern "C"
 
     }
 
-    void collide(float *newVel,
+    void collide(float* prevPos,
+                 float* newPos,
+                 float *newVel,
                  float *sortedPos,
                  float *sortedVel,
                  uint  *gridParticleIndex,
@@ -215,7 +217,9 @@ extern "C"
         computeGridSize(numParticles, 64, numBlocks, numThreads);
 
         // execute the kernel
-        collideD<<< numBlocks, numThreads >>>((float4 *)newVel,
+        collideD<<< numBlocks, numThreads >>>((float4 *)prevPos,
+                                              (float4 *)newPos,
+                                              (float4 *)newVel,
                                               (float4 *)sortedPos,
                                               (float4 *)sortedVel,
                                               gridParticleIndex,
@@ -236,7 +240,9 @@ extern "C"
                             thrust::device_ptr<uint>(dGridParticleIndex));
     }
 
-    void parallel_sim(float* pos,
+    void parallel_sim(
+        float* prevPos,
+        float* pos,
         float* vel,
         float deltaTime,
         uint numParticles,
@@ -247,7 +253,8 @@ extern "C"
         uint blockPerSide = iDivUp(sqrt(numParticles), blockDim.x);
         dim3 gridDim(blockPerSide, blockPerSide);
         uint sideLength = sqrt(numParticles);
-        parallel_kernel<<< gridDim, blockDim >>> (pos, vel, deltaTime, sideLength, mass, dist, damp);
+        //cudaMemcpy(prevPos, pos, sizeof(float) * 4 * numParticles, cudaMemcpyDeviceToDevice);
+        parallel_kernel<<< gridDim, blockDim >>> (prevPos, pos, vel, deltaTime, sideLength, mass, dist, damp);
     }
 
 

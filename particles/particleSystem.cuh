@@ -49,7 +49,9 @@ extern "C"
                                      uint   numParticles,
                                      uint   numCells);
 
-    void collide(float *newVel,
+    void collide(float *prevPos,
+                 float *newPos,
+                 float *newVel,
                  float *sortedPos,
                  float *sortedVel,
                  uint  *gridParticleIndex,
@@ -60,7 +62,9 @@ extern "C"
 
     void sortParticles(uint *dGridParticleHash, uint *dGridParticleIndex, uint numParticles);
 
-    void parallel_sim(float* pos,
+    void parallel_sim(
+        float* prevPos,
+        float* pos,
         float* vel,
         float deltaTime,
         uint numParticles,
