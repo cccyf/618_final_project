@@ -249,7 +249,7 @@ Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v
     float m_ks = 50.f;
     float m_kd = 0.98f;
     Vector3f pos_diff = make_vector(p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]);
-    Vector3f force = -(m_ks * (length(pos_diff) - m_dist) + m_kd * (make_vector(v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]) * pos_diff) / length(pos_diff)) * pos_diff / length(pos_diff);
+	Vector3f force = -(m_ks * (length(pos_diff) - m_dist) + m_kd * (make_vector(v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]) * pos_diff) / length(pos_diff)) * pos_diff / length(pos_diff);
     return force;
 }
 
@@ -284,7 +284,7 @@ void
 ParticleSystem::update(float deltaTime)
 {   
     //afloat* dPos = getArray(POSITION);
-    bool seq = false;
+    bool seq = true;
     if (seq) {
         sdkStartTimer(&integrate_t);
         float* dPos = m_hPos;
@@ -387,6 +387,20 @@ ParticleSystem::update(float deltaTime)
             cVel[2] = vel.z;
         }
         sdkStopTimer(&integrate_t);
+		
+		// collission detection with sphere
+		Vector3f sphere = make_vector(m_params.colliderPos.x, m_params.colliderPos.y, m_params.colliderPos.z);
+
+		for (uint i = 0; i < m_numParticles; i++) {
+			Vector3f p = make_vector(dPos[4 * i], dPos[4 * i + 1], dPos[4 * i + 2]);
+			Vector3f diff = p - sphere;
+			if (length(diff) <= m_params.colliderRadius) {
+				dVel[4 * i] = 0.f;
+				dVel[4 * i+1] = 0.f;
+				dVel[4 * i+2] = 0.f;
+			}
+		}
+		
         sdkStartTimer(&collide_t);
 		for (uint i = 0; i < m_numParticles; i++) {
 			for (uint j = 0; j < m_numParticles; j++) {
