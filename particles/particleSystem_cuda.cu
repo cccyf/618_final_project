@@ -249,7 +249,7 @@ extern "C"
         float mass,
         float dist,
         float damp) {
-        dim3 blockDim(8,8);
+        dim3 blockDim(BLOCK_DIM_X,BLOCK_DIM_Y);
         uint blockPerSide = iDivUp(sqrt(numParticles), blockDim.x);
         dim3 gridDim(blockPerSide, blockPerSide);
         uint sideLength = sqrt(numParticles);

@@ -382,7 +382,6 @@ void compute_force(float4* p1, float4* p2, float4* v1, float4* v2, float m_dist,
     Eigen::Vector3f vel_diff = { v1->x - v2->x, v1->y - v2->y, v1->z - v2->z };
     float dot_product = vel_diff.dot(pos_diff);
     *res = -(m_ks * (pos_diff.norm() - m_dist) + m_kd * dot_product / pos_diff.norm()) * pos_diff / pos_diff.norm();
-    //printf("%f %f\n", res->norm(), pos_diff.norm());
 }
 
 //Round a / b to nearest higher integer value
@@ -399,187 +398,179 @@ bool check_collision(float* p1, float* p2, float dist) {
     return pos_diff.norm() < dist;
 }
 
-__global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
-    __shared__ float4 block_pos[144];
-    __shared__ float4 block_vel[144];
-    //__shared__ float all_pos[10000*4];
+#define BLOCK_DIM_X 8
+#define BLOCK_DIM_Y 8
 
-    uint xstart = blockIdx.x * blockDim.x - 2, ystart = blockIdx.y * blockDim.y - 2;
+__global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
+	//__shared__ float4 block_pos[144];
+    //__shared__ float4 block_vel[144];
+	__shared__ float4 block_pos[(1*BLOCK_DIM_X + 4)*(1*BLOCK_DIM_Y + 4)];
+	__shared__ float4 block_vel[(1*BLOCK_DIM_X + 4)*(1*BLOCK_DIM_Y + 4)];
+
+	uint col = 1;
+	uint row = 1;
+	uint width = col * BLOCK_DIM_X + 4;
+	uint height = row * BLOCK_DIM_Y + 4;
+
+    uint xstart = blockIdx.x * blockDim.x * col - 2, ystart = blockIdx.y * blockDim.y * row - 2;
     uint threadInd = threadIdx.y * blockDim.x + threadIdx.x;
-    for (uint i = threadInd; i < 144; i += blockDim.x * blockDim.y) {
-        uint x = xstart + i % 12;
-        uint y = ystart + i / 12;
-        x = x > 0 ? (x < sideLength - 1 ? x : sideLength - 1) : 0;
-        y = y > 0 ? (y < sideLength - 1 ? y : sideLength - 1) : 0;
+    for (uint i = threadInd; i < width * height; i += blockDim.x * blockDim.y) {
+        uint x = xstart + i % width;
+        uint y = ystart + i / width;
+		if (x < 0 || x > sideLength - 1 || y < 0 || y > sideLength - 1) {
+			continue;
+		}
+
+        //x = x > 0 ? (x < sideLength - 1 ? x : sideLength - 1) : 0;
+        //y = y > 0 ? (y < sideLength - 1 ? y : sideLength - 1) : 0;
         block_pos[i] = *(float4*)&pos[4 * (x + y * sideLength)];
         block_vel[i] = *(float4*)&vel[4 * (x + y * sideLength)];
     }
-    /*
-    uint numThreads = blockDim.x * blockDim.y * gridDim.x * gridDim.y;
-    uint blockInd = gridDim.x * blockIdx.y + blockIdx.x;
-    uint tid = threadInd + blockInd * blockDim.x * blockDim.y;
-    uint copyPerThread = iDiv(sideLength * sideLength * 4, numThreads);
-        printf("copy per thread %d\n", copyPerThread);
-    for (uint i = 0; i < copyPerThread; i++) {
-        prevPos[i + copyPerThread * tid] = pos[i + copyPerThread * tid];
-    }
-    */
-    /*
-    for (uint i = threadInd; i < 10000; i += blockDim.x * blockDim.y) {
-        for (uint j = 0; j < 4; j++) {
-            all_pos[4*i+j] = pos[4 * i + j];
-        }
-    }
-    */
+
     __syncthreads();
+	for (uint xi = 0; xi < col; xi++) {
+		for (uint yi = 0; yi < row; yi++) {
+			uint globalx = col * blockDim.x * blockIdx.x + blockDim.x * xi+ threadIdx.x;
+			uint globaly = row * blockDim.y * blockIdx.y + blockDim.y * yi + threadIdx.y;
+			if (globalx >= sideLength || globaly >= sideLength) {
+				continue;
+			}
+			
+			// save prev positions
+			for (uint i = 0; i < 4; i++) {
+				prevPos[globaly * sideLength + globalx + i] = pos[globaly * sideLength + globalx + i];
+			}
 
-    uint globalx = blockDim.x * blockIdx.x + threadIdx.x;
-    uint globaly = blockDim.y * blockIdx.y + threadIdx.y;
-    if (globalx >= sideLength || globaly >= sideLength) return;
-    for (uint i = 0; i < 4; i++) {
-        prevPos[globaly * sideLength + globalx + i] = pos[globaly * sideLength + globalx + i];
-    }
-    
+			if ((globalx == 0 && globaly == 0) || (globalx == sideLength - 1 && globaly == sideLength - 1)) continue;
 
-    if ((globalx == 0 && globaly == 0) || (globalx == sideLength - 1 && globaly == sideLength - 1)) return;
-    
+			uint xind = blockDim.x * xi + threadIdx.x + 2;
+			uint yind = blockDim.y * yi + threadIdx.y + 2;
 
-    uint xind = threadIdx.x + 2, yind = threadIdx.y + 2;
-    Eigen::Vector3f force_accumulator;
-    Eigen::Vector3f cur_force;
-    force_accumulator = { 0.0f, -0.098f * mass, 0.0f };
-    float4* cPos = &block_pos[xind + yind * 12];
-    float4* cVel = &block_vel[xind + yind * 12];
-    float dist = offset;
-    if (globalx > 0) {
-        float4* nPos = &block_pos[xind - 1 + yind * 12];
-        float4* nVel = &block_vel[xind - 1 + yind * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			Eigen::Vector3f force_accumulator;
+			Eigen::Vector3f cur_force;
 
-    if (globaly > 0) {
-        float4* nPos = &block_pos[xind + (yind-1) * 12];
-        float4* nVel = &block_vel[xind + (yind-1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			force_accumulator = { 0.0f, -0.098f * mass, 0.0f };
 
-    if (globalx < sideLength-1) {
-        float4* nPos = &block_pos[xind + 1 + yind * 12];
-        float4* nVel = &block_vel[xind + 1 + yind * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			float4 *cPos = &block_pos[xind + yind * width];
+			float4 *cVel = &block_vel[xind + yind * width];
 
-    if (globaly < sideLength-1) {
-        float4* nPos = &block_pos[xind + (yind + 1) * 12];
-        float4* nVel = &block_vel[xind + (yind + 1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			float dist = offset;
 
-    dist *= sqrt(2.0f);
+			if (globalx > 0) {
+				float4* nPos = &block_pos[xind - 1 + yind * width];
+				float4* nVel = &block_vel[xind - 1 + yind * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx > 0 && globaly > 0) {
-        float4* nPos = &block_pos[xind - 1 + (yind - 1) * 12];
-        float4* nVel = &block_vel[xind - 1 + (yind - 1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globaly > 0) {
+				float4* nPos = &block_pos[xind + (yind - 1) * width];
+				float4* nVel = &block_vel[xind + (yind - 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx < sideLength - 1 && globaly > 0) {
-        float4* nPos = &block_pos[xind + 1 + (yind - 1) * 12];
-        float4* nVel = &block_vel[xind + 1 + (yind - 1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globalx < sideLength - 1) {
+				float4* nPos = &block_pos[xind + 1 + yind * width];
+				float4* nVel = &block_vel[xind + 1 + yind * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx > 0 && globaly < sideLength - 1) {
-        float4* nPos = &block_pos[xind - 1 + (yind + 1) * 12];
-        float4* nVel = &block_vel[xind - 1 + (yind + 1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globaly < sideLength - 1) {
+				float4* nPos = &block_pos[xind + (yind + 1) * width];
+				float4* nVel = &block_vel[xind + (yind + 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx < sideLength - 1 && globaly < sideLength - 1) {
-        float4* nPos = &block_pos[xind + 1 + (yind + 1) * 12];
-        float4* nVel = &block_vel[xind + 1 + (yind + 1) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			dist *= sqrt(2.0f);
 
-    dist *= sqrt(2.0f);
+			if (globalx > 0 && globaly > 0) {
+				float4* nPos = &block_pos[xind - 1 + (yind - 1) * width];
+				float4* nVel = &block_vel[xind - 1 + (yind - 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx > 1) {
-        float4* nPos = &block_pos[xind - 2 + yind * 12];
-        float4* nVel = &block_vel[xind - 2 + yind * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globalx < sideLength - 1 && globaly > 0) {
+				float4* nPos = &block_pos[xind + 1 + (yind - 1) * width];
+				float4* nVel = &block_vel[xind + 1 + (yind - 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globaly > 1) {
-        float4* nPos = &block_pos[xind + (yind - 2) * 12];
-        float4* nVel = &block_vel[xind + (yind - 2) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globalx > 0 && globaly < sideLength - 1) {
+				float4* nPos = &block_pos[xind - 1 + (yind + 1) * width];
+				float4* nVel = &block_vel[xind - 1 + (yind + 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globalx < sideLength-2) {
-        float4* nPos = &block_pos[xind + 2 + yind * 12];
-        float4* nVel = &block_vel[xind + 2 + yind * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
+			if (globalx < sideLength - 1 && globaly < sideLength - 1) {
+				float4* nPos = &block_pos[xind + 1 + (yind + 1) * width];
+				float4* nVel = &block_vel[xind + 1 + (yind + 1) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    if (globaly < sideLength-2) {
-        float4* nPos = &block_pos[xind + (yind + 2) * 12];
-        float4* nVel = &block_vel[xind + (yind + 2) * 12];
-        compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
-        force_accumulator += cur_force;
-    }
-    
-    //printf("%f\n", force_accumulator.norm());
+			dist *= sqrt(2.0f);
 
-    Eigen::Vector3f vPos = { cPos->x, cPos->y, cPos->z };
-    Eigen::Vector3f vVel = { cVel->x, cVel->y, cVel->z };
-    vPos += deltaTime * vVel;
-    vVel = damp * vVel + deltaTime * force_accumulator / mass;
-    uint start_ind = (globalx + globaly * sideLength) * 4;
-    Eigen::Vector3f collider_pos = { params.colliderPos.x, params.colliderPos.y, params.colliderPos.z };
-    if ((vPos - collider_pos).norm() > params.colliderRadius) {
-        pos[start_ind] = vPos.x();
-        //pos[start_ind + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
-        pos[start_ind + 1] = vPos.y();
-        pos[start_ind + 2] = vPos.z();
-        vel[start_ind] = vVel.x();
-        vel[start_ind + 1] = vVel.y();
-        vel[start_ind + 2] = vVel.z();
-    }
-    else {
-        vel[start_ind] = 0.f;
-        vel[start_ind + 1] = 0.f;
-        vel[start_ind + 2] = 0.f;
-    }
-    
-    /*
+			if (globalx > 1) {
+				float4* nPos = &block_pos[xind - 2 + yind * width];
+				float4* nVel = &block_vel[xind - 2 + yind * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-    for (uint i = 0; i < sideLength*sideLength; i++) {
-        uint ix = i % sideLength;
-        uint iy = i / sideLength;
-        if (is_neighbor(globalx, globaly, ix, iy) || !(check_collision(&pos[start_ind], &all_pos[i], offset))) {
-            continue;
-        }
+			if (globaly > 1) {
+				float4* nPos = &block_pos[xind + (yind - 2) * width];
+				float4* nVel = &block_vel[xind + (yind - 2) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
 
-        // reset position
-        memcpy(&pos[start_ind], &all_pos[start_ind], 4 * sizeof(float));
-        // reset velocity
-        vel[start_ind] = 0.f;
-        vel[start_ind + 1] = 0.f;
-        vel[start_ind + 2] = 0.f;
-        break;
-    }
-    */
+			if (globalx < sideLength - 2) {
+				float4* nPos = &block_pos[xind + 2 + yind * width];
+				float4* nVel = &block_vel[xind + 2 + yind * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
+
+			if (globaly < sideLength - 2) {
+				float4* nPos = &block_pos[xind + (yind + 2) * width];
+				float4* nVel = &block_vel[xind + (yind + 2) * width];
+				compute_force(cPos, nPos, cVel, nVel, dist, &cur_force);
+				force_accumulator += cur_force;
+			}
+
+			Eigen::Vector3f vPos = { cPos->x, cPos->y, cPos->z };
+			Eigen::Vector3f vVel = { cVel->x, cVel->y, cVel->z };
+
+
+			vPos += deltaTime * vVel;
+			vVel = damp * vVel + deltaTime * force_accumulator / mass;
+			
+			uint start_ind = (globalx + globaly * sideLength) * 4;
+
+			Eigen::Vector3f collider_pos = { params.colliderPos.x, params.colliderPos.y, params.colliderPos.z };
+			if ((vPos - collider_pos).norm() > params.colliderRadius) {
+				pos[start_ind] = vPos.x();
+				//pos[start_ind + 1] = vPos.y() > -0.5f ? vPos.y() : -0.5f;
+				pos[start_ind + 1] = vPos.y();
+				pos[start_ind + 2] = vPos.z();
+				vel[start_ind] = vVel.x();
+				vel[start_ind + 1] = vVel.y();
+				vel[start_ind + 2] = vVel.z();
+			}
+			else {
+				vel[start_ind] = 0.f;
+				vel[start_ind + 1] = 0.f;
+				vel[start_ind + 2] = 0.f;
+			}
+		}
+	}
+   
 }
 
 #endif

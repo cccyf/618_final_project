@@ -284,7 +284,7 @@ void
 ParticleSystem::update(float deltaTime)
 {   
     //afloat* dPos = getArray(POSITION);
-    bool seq = true;
+    bool seq = false;
     if (seq) {
         sdkStartTimer(&integrate_t);
         float* dPos = m_hPos;
