@@ -16,8 +16,8 @@
 #include "particleSystem.h"
 #include "particleSystem.cuh"
 #include "particles_kernel.cuh"
-#include <omp.h>
 
+#include "omp_sim.h"
 #include <cuda_runtime.h>
 
 #include <helper_functions.h>
@@ -253,25 +253,14 @@ Vector3f ParticleSystem::compute_force(float* p1, float* p2, float* v1, float* v
     return force;
 }
 
-bool is_neighbor(uint ind1, uint ind2, uint side) {
-	/*
-    
-    if (ind1 > ind2) {
-		uint t = ind1;
-		ind1 = ind2;
-		ind2 = t;
-	}
-	uint diff = ind2 - ind1;
-	if (diff == 1 || diff == 2 || diff == side || diff == 2 * side || diff == side - 1 || diff == side + 1) {
-    	return true;
-	}
-    */
-    int x1 = ind1 % side;
-    int y1 = ind1 / side;
-    int x2 = ind2 % side;
-    int y2 = ind2 / side;
 
-    return (abs(x1 - x2) + abs(y1 - y2) <= 2);
+bool is_neighbor(uint ind1, uint ind2, uint side) {
+	int x1 = ind1 % side;
+	int y1 = ind1 / side;
+	int x2 = ind2 % side;
+	int y2 = ind2 / side;
+
+	return (abs(x1 - x2) + abs(y1 - y2) <= 2);
 }
 
 bool check_collision(float* p1, float*p2, float dist) {
@@ -279,143 +268,133 @@ bool check_collision(float* p1, float*p2, float dist) {
 	return length(pos_diff) < dist;
 }
 
-// step the simulation
-void
-ParticleSystem::update(float deltaTime)
-{   
-    int type = 2; // 0/1 for sequential or omp, 2 for cuda
-    if (type <= 1) {
-        sdkStartTimer(&integrate_t);
-        float* dPos = m_hPos;
-        float* dVel = m_hVel;
-		float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
-		memcpy(prevPos, dPos, 4 * m_numParticles * sizeof(float));
-        uint side = sqrt(m_numParticles);
-        Vector3f force_accumulator;
+void ParticleSystem::seq_sim() {
+	sdkStartTimer(&integrate_t);
+	float* dPos = m_hPos;
+	float* dVel = m_hVel;
+	float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
+	memcpy(prevPos, dPos, 4 * m_numParticles * sizeof(float));
+	uint side = sqrt(m_numParticles);
+	Vector3f force_accumulator;
 
-		#pragma omp parallel for
-        for (int i = 1; i < m_numParticles - 1; i++) {
-            force_accumulator = make_vector(0.0f, -9.8f * m_params.mass, 0.0f);
-            uint xind = i % side;
-            uint yind = i / side;
-            float* cPos = &dPos[(xind + yind * side) * 4];
-            float* cVel = &dVel[(xind + yind * side) * 4];
-            float dist = m_params.offset;
-            if (xind > 0) {
-                float* nPos = &dPos[(xind - 1 + yind * side) * 4];
-                float* nVel = &dVel[(xind - 1 + yind * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (yind > 0) {
-                float* nPos = &dPos[(xind + (yind - 1) * side) * 4];
-                float* nVel = &dVel[(xind + (yind - 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (xind < side - 1) {
-                float* nPos = &dPos[(xind + 1 + yind * side) * 4];
-                float* nVel = &dVel[(xind + 1 + yind * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (yind < side - 1) {
-                float* nPos = &dPos[(xind + (yind + 1) * side) * 4];
-                float* nVel = &dVel[(xind + (yind + 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            dist *= sqrt(2);
-
-            if (xind > 0 && yind > 0) {
-                float* nPos = &dPos[(xind - 1 + (yind - 1) * side) * 4];
-                float* nVel = &dVel[(xind - 1 + (yind - 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (xind < side - 1 && yind > 0) {
-                float* nPos = &dPos[(xind + 1 + (yind - 1) * side) * 4];
-                float* nVel = &dVel[(xind + 1 + (yind - 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (xind > 0 && yind < side - 1) {
-                float* nPos = &dPos[(xind - 1 + (yind + 1) * side) * 4];
-                float* nVel = &dVel[(xind - 1 + (yind + 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (xind < side - 1 && yind < side - 1) {
-                float* nPos = &dPos[(xind + 1 + (yind + 1) * side) * 4];
-                float* nVel = &dVel[(xind + 1 + (yind + 1) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            dist *= sqrt(2);
-
-            if (xind > 1) {
-                float* nPos = &dPos[(xind - 2 + yind * side) * 4];
-                float* nVel = &dVel[(xind - 2 + yind * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (yind > 1) {
-                float* nPos = &dPos[(xind + (yind - 2) * side) * 4];
-                float* nVel = &dVel[(xind + (yind - 2) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (xind < side - 2) {
-                float* nPos = &dPos[(xind + 2 + yind * side) * 4];
-                float* nVel = &dVel[(xind + 2 + yind * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-
-            if (yind < side - 2) {
-                float* nPos = &dPos[(xind + (yind + 2) * side) * 4];
-                float* nVel = &dVel[(xind + (yind + 2) * side) * 4];
-                force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
-            }
-            Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
-            Vector3f vel = make_vector(cVel[0], cVel[1], cVel[2]);
-            pos += m_params.dt * vel;
-            vel = m_params.damp * vel + m_params.dt * force_accumulator / m_params.mass;
-            cPos[0] = pos.x;
-            cPos[1] = std::max(-10.f, pos.y);
-            cPos[2] = pos.z;
-            cVel[0] = vel.x;
-            cVel[1] = vel.y;
-            cVel[2] = vel.z;
-        }
-        sdkStopTimer(&integrate_t);
-		
-		// collission detection with sphere
-		Vector3f sphere = make_vector(m_params.colliderPos.x, m_params.colliderPos.y, m_params.colliderPos.z);
-	   #pragma omp parallel for
-		for (int i = 0; i < m_numParticles; i++) {
-			Vector3f p = make_vector(dPos[4 * i], dPos[4 * i + 1], dPos[4 * i + 2]);
-			Vector3f diff = p - sphere;
-			if (length(diff) <= m_params.colliderRadius) {
-				dVel[4 * i] = 0.f;
-				dVel[4 * i+1] = 0.f;
-				dVel[4 * i+2] = 0.f;
-			}
+	for (int i = 1; i < m_numParticles - 1; i++) {
+		force_accumulator = make_vector(0.0f, -9.8f * m_params.mass, 0.0f);
+		uint xind = i % side;
+		uint yind = i / side;
+		float* cPos = &dPos[(xind + yind * side) * 4];
+		float* cVel = &dVel[(xind + yind * side) * 4];
+		float dist = m_params.offset;
+		if (xind > 0) {
+			float* nPos = &dPos[(xind - 1 + yind * side) * 4];
+			float* nVel = &dVel[(xind - 1 + yind * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
 		}
-		
-        sdkStartTimer(&collide_t);
 
-		// for openmp
-#pragma omp parallel for schedule(dynamic, 64)
-		for (int ij = 0; ij < m_numParticles*m_numParticles; ij++) {
-			int i = ij / m_numParticles;
-			int j = ij % m_numParticles;
-			if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4 * i], &dPos[4 * j], m_params.offset))) {
+		if (yind > 0) {
+			float* nPos = &dPos[(xind + (yind - 1) * side) * 4];
+			float* nVel = &dVel[(xind + (yind - 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (xind < side - 1) {
+			float* nPos = &dPos[(xind + 1 + yind * side) * 4];
+			float* nVel = &dVel[(xind + 1 + yind * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (yind < side - 1) {
+			float* nPos = &dPos[(xind + (yind + 1) * side) * 4];
+			float* nVel = &dVel[(xind + (yind + 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		dist *= sqrt(2);
+
+		if (xind > 0 && yind > 0) {
+			float* nPos = &dPos[(xind - 1 + (yind - 1) * side) * 4];
+			float* nVel = &dVel[(xind - 1 + (yind - 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (xind < side - 1 && yind > 0) {
+			float* nPos = &dPos[(xind + 1 + (yind - 1) * side) * 4];
+			float* nVel = &dVel[(xind + 1 + (yind - 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (xind > 0 && yind < side - 1) {
+			float* nPos = &dPos[(xind - 1 + (yind + 1) * side) * 4];
+			float* nVel = &dVel[(xind - 1 + (yind + 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (xind < side - 1 && yind < side - 1) {
+			float* nPos = &dPos[(xind + 1 + (yind + 1) * side) * 4];
+			float* nVel = &dVel[(xind + 1 + (yind + 1) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		dist *= sqrt(2);
+
+		if (xind > 1) {
+			float* nPos = &dPos[(xind - 2 + yind * side) * 4];
+			float* nVel = &dVel[(xind - 2 + yind * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (yind > 1) {
+			float* nPos = &dPos[(xind + (yind - 2) * side) * 4];
+			float* nVel = &dVel[(xind + (yind - 2) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (xind < side - 2) {
+			float* nPos = &dPos[(xind + 2 + yind * side) * 4];
+			float* nVel = &dVel[(xind + 2 + yind * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+
+		if (yind < side - 2) {
+			float* nPos = &dPos[(xind + (yind + 2) * side) * 4];
+			float* nVel = &dVel[(xind + (yind + 2) * side) * 4];
+			force_accumulator += compute_force(cPos, nPos, cVel, nVel, dist);
+		}
+		Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
+		Vector3f vel = make_vector(cVel[0], cVel[1], cVel[2]);
+		pos += m_params.dt * vel;
+		vel = m_params.damp * vel + m_params.dt * force_accumulator / m_params.mass;
+		cPos[0] = pos.x;
+		cPos[1] = std::max(-10.f, pos.y);
+		cPos[2] = pos.z;
+		cVel[0] = vel.x;
+		cVel[1] = vel.y;
+		cVel[2] = vel.z;
+	}
+	sdkStopTimer(&integrate_t);
+
+	// collission detection with sphere
+	Vector3f sphere = make_vector(m_params.colliderPos.x, m_params.colliderPos.y, m_params.colliderPos.z);
+	for (int i = 0; i < m_numParticles; i++) {
+		Vector3f p = make_vector(dPos[4 * i], dPos[4 * i + 1], dPos[4 * i + 2]);
+		Vector3f diff = p - sphere;
+		if (length(diff) <= m_params.colliderRadius) {
+			dVel[4 * i] = 0.f;
+			dVel[4 * i + 1] = 0.f;
+			dVel[4 * i + 2] = 0.f;
+		}
+	}
+
+	sdkStartTimer(&collide_t);
+
+	for (int i = 0; i < m_numParticles; i++) {
+		for (int j = 0; j < m_numParticles; j++) {
+			if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4*i], &dPos[4*j], m_params.offset))) {
 				continue;
 			}
-			// reset position
-			memcpy(&dPos[4 * i], &prevPos[4 * i], 4 * sizeof(float));
-			memcpy(&dPos[4 * j], &prevPos[4 * j], 4 * sizeof(float));
 
+			// reset position
+			memcpy(&dPos[4 * i], &prevPos[4 * i], 4*sizeof(float));
+			memcpy(&dPos[4 * j], &prevPos[4 * j], 4*sizeof(float));
 			// reset velocity
 			dVel[4 * i] = 0.f;
 			dVel[4 * i + 1] = 0.f;
@@ -425,31 +404,23 @@ ParticleSystem::update(float deltaTime)
 			dVel[4 * j + 2] = 0.f;
 		}
 
-		/*
-		#pragma omp parallel for schedule(dynamic, 1)
-		for (int i = 0; i < m_numParticles; i++) {
-			for (int j = 0; j < m_numParticles; j++) {
-				if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4*i], &dPos[4*j], offset))) {
-					continue;
-				}
-				
-				// reset position
-				memcpy(&dPos[4 * i], &prevPos[4 * i], 4*sizeof(float));
-				memcpy(&dPos[4 * j], &prevPos[4 * j], 4*sizeof(float));
-				// reset velocity
-				dVel[4 * i] = 0.f;
-				dVel[4 * i + 1] = 0.f;
-				dVel[4 * i + 2] = 0.f;
-				dVel[4 * j] = 0.f;
-				dVel[4 * j + 1] = 0.f;
-				dVel[4 * j + 2] = 0.f;
-			}
+	}
+	delete prevPos;
+	sdkStopTimer(&collide_t);
+}
 
-		}*/
-		delete prevPos;
-        sdkStopTimer(&collide_t);
-        setArray(POSITION, dPos, 0, m_numParticles);
-        
+// step the simulation
+void
+ParticleSystem::update(float deltaTime)
+{   
+    int type = 2; // 0/1 for sequential or omp, 2 for cuda
+	if (type == 0) {
+		seq_sim();
+		setArray(POSITION, m_hPos, 0, m_numParticles);
+	}else
+    if (type == 1) {
+		omp_sim(m_hPos, m_hVel, m_numParticles, m_params);
+		setArray(POSITION, m_hPos, 0, m_numParticles);
 	}
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);

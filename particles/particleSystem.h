@@ -192,6 +192,8 @@ class ParticleSystem
         StopWatchInterface *m_timer;
 
         uint m_solverIterations;
+
+		void seq_sim();
 };
 
 #endif // __PARTICLESYSTEM_H__
