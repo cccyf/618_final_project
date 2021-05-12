@@ -16,7 +16,7 @@
 #include "particleSystem.h"
 #include "particleSystem.cuh"
 #include "particles_kernel.cuh"
-
+#include <omp.h>
 
 #include <cuda_runtime.h>
 
@@ -283,9 +283,8 @@ bool check_collision(float* p1, float*p2, float dist) {
 void
 ParticleSystem::update(float deltaTime)
 {   
-    //afloat* dPos = getArray(POSITION);
-    bool seq = false;
-    if (seq) {
+    int type = 0; // 0/1 for sequential or omp, 2 for cuda
+    if (type <= 1) {
         sdkStartTimer(&integrate_t);
         float* dPos = m_hPos;
         float* dVel = m_hVel;
@@ -293,7 +292,9 @@ ParticleSystem::update(float deltaTime)
 		memcpy(prevPos, dPos, 4 * m_numParticles * sizeof(float));
         uint side = sqrt(m_numParticles);
         Vector3f force_accumulator;
-        for (uint i = 1; i < m_numParticles - 1; i++) {
+
+		#pragma omp parallel for
+        for (int i = 1; i < m_numParticles - 1; i++) {
             force_accumulator = make_vector(0.0f, -9.8f * mass, 0.0f);
             uint xind = i % side;
             uint yind = i / side;
@@ -390,8 +391,8 @@ ParticleSystem::update(float deltaTime)
 		
 		// collission detection with sphere
 		Vector3f sphere = make_vector(m_params.colliderPos.x, m_params.colliderPos.y, m_params.colliderPos.z);
-
-		for (uint i = 0; i < m_numParticles; i++) {
+	   #pragma omp parallel for
+		for (int i = 0; i < m_numParticles; i++) {
 			Vector3f p = make_vector(dPos[4 * i], dPos[4 * i + 1], dPos[4 * i + 2]);
 			Vector3f diff = p - sphere;
 			if (length(diff) <= m_params.colliderRadius) {
@@ -402,8 +403,32 @@ ParticleSystem::update(float deltaTime)
 		}
 		
         sdkStartTimer(&collide_t);
-		for (uint i = 0; i < m_numParticles; i++) {
-			for (uint j = 0; j < m_numParticles; j++) {
+
+		// for openmp
+#pragma omp parallel for schedule(dynamic, 64)
+		for (int ij = 0; ij < m_numParticles*m_numParticles; ij++) {
+			int i = ij / m_numParticles;
+			int j = ij % m_numParticles;
+			if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4 * i], &dPos[4 * j], offset))) {
+				continue;
+			}
+			// reset position
+			memcpy(&dPos[4 * i], &prevPos[4 * i], 4 * sizeof(float));
+			memcpy(&dPos[4 * j], &prevPos[4 * j], 4 * sizeof(float));
+
+			// reset velocity
+			dVel[4 * i] = 0.f;
+			dVel[4 * i + 1] = 0.f;
+			dVel[4 * i + 2] = 0.f;
+			dVel[4 * j] = 0.f;
+			dVel[4 * j + 1] = 0.f;
+			dVel[4 * j + 2] = 0.f;
+		}
+
+		/*
+		#pragma omp parallel for schedule(dynamic, 1)
+		for (int i = 0; i < m_numParticles; i++) {
+			for (int j = 0; j < m_numParticles; j++) {
 				if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4*i], &dPos[4*j], offset))) {
 					continue;
 				}
@@ -420,12 +445,12 @@ ParticleSystem::update(float deltaTime)
 				dVel[4 * j + 2] = 0.f;
 			}
 
-		}
+		}*/
 		delete prevPos;
         sdkStopTimer(&collide_t);
         setArray(POSITION, dPos, 0, m_numParticles);
         
-    }
+	}
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
         setParameters(&m_params);
@@ -466,77 +491,6 @@ ParticleSystem::update(float deltaTime)
     }
     
 
-    
-    
-    //setArray(VELOCITY, dVel, 0, m_numParticles);
-    
-    /*
-    assert(m_bInitialized);
-
-    
-    if (m_bUseOpenGL)
-    {
-        dPos = (float *) mapGLBufferObject(&m_cuda_posvbo_resource);
-    }
-    else
-    {
-        dPos = (float *) m_cudaPosVBO;
-    }
-    
-    
-
-    
-    // update constants
-    setParameters(&m_params);
-    
-    // integrate
-    integrateSystem(
-        dPos,
-        m_dVel,
-        deltaTime,
-        m_numParticles);
-    
-    // calculate grid hash
-    calcHash(
-        m_dGridParticleHash,
-        m_dGridParticleIndex,
-        dPos,
-        m_numParticles);
-    
-    // sort particles based on hash
-    sortParticles(m_dGridParticleHash, m_dGridParticleIndex, m_numParticles);
-
-    // reorder particle arrays into sorted order and
-    // find start and end of each cell
-    reorderDataAndFindCellStart(
-        m_dCellStart,
-        m_dCellEnd,
-        m_dSortedPos,
-        m_dSortedVel,
-        m_dGridParticleHash,
-        m_dGridParticleIndex,
-        dPos,
-        m_dVel,
-        m_numParticles,
-        m_numGridCells);
-
-    // process collisions
-    collide(
-        m_dVel,
-        m_dSortedPos,
-        m_dSortedVel,
-        m_dGridParticleIndex,
-        m_dCellStart,
-        m_dCellEnd,
-        m_numParticles,
-        m_numGridCells);
-    
-    // note: do unmap at end here to avoid unnecessary graphics/CUDA context switch
-    if (m_bUseOpenGL)
-    {
-        unmapGLBufferObject(m_cuda_posvbo_resource);
-    }
-    */
     //printf("integration time: %.3f; collide time: %.3f\n", sdkGetAverageTimerValue(&integrate_t), sdkGetAverageTimerValue(&collide_t));
 }
 
