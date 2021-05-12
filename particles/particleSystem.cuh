@@ -66,10 +66,6 @@ extern "C"
         float* prevPos,
         float* pos,
         float* vel,
-        float deltaTime,
-        uint numParticles,
-        float mass,
-        float dist,
-        float damp);
+		uint numParticles);
 
 }

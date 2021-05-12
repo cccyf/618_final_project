@@ -292,7 +292,7 @@ float3 collideCell(int3    gridPos,
 
     float3 force = make_float3(0.0f);
 
-    uint sideLength = sqrt((float)params.numBodies);
+    uint sideLength = sqrt((float)params.numParticles);
 
     if (startIndex != 0xffffffff)          // cell is not empty
     {
@@ -401,7 +401,7 @@ bool check_collision(float* p1, float* p2, float dist) {
 #define BLOCK_DIM_X 8
 #define BLOCK_DIM_Y 8
 
-__global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float deltaTime, uint sideLength, float mass, float offset, float damp) {
+__global__ void parallel_kernel(float* prevPos, float* pos, float* vel, uint sideLength) {
 	//__shared__ float4 block_pos[144];
     //__shared__ float4 block_vel[144];
 	__shared__ float4 block_pos[(1*BLOCK_DIM_X + 4)*(1*BLOCK_DIM_Y + 4)];
@@ -449,12 +449,12 @@ __global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float de
 			Eigen::Vector3f force_accumulator;
 			Eigen::Vector3f cur_force;
 
-			force_accumulator = { 0.0f, -0.098f * mass, 0.0f };
+			force_accumulator = { 0.0f, -0.098f * params.mass, 0.0f };
 
 			float4 *cPos = &block_pos[xind + yind * width];
 			float4 *cVel = &block_vel[xind + yind * width];
 
-			float dist = offset;
+			float dist = params.offset;
 
 			if (globalx > 0) {
 				float4* nPos = &block_pos[xind - 1 + yind * width];
@@ -548,8 +548,8 @@ __global__ void parallel_kernel(float* prevPos, float* pos, float* vel, float de
 			Eigen::Vector3f vVel = { cVel->x, cVel->y, cVel->z };
 
 
-			vPos += deltaTime * vVel;
-			vVel = damp * vVel + deltaTime * force_accumulator / mass;
+			vPos += params.dt * vVel;
+			vVel = params.damp * vVel + params.dt * force_accumulator / params.mass;
 			
 			uint start_ind = (globalx + globaly * sideLength) * 4;
 

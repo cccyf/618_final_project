@@ -244,17 +244,13 @@ extern "C"
         float* prevPos,
         float* pos,
         float* vel,
-        float deltaTime,
-        uint numParticles,
-        float mass,
-        float dist,
-        float damp) {
+		uint numParticles) {
         dim3 blockDim(BLOCK_DIM_X,BLOCK_DIM_Y);
-        uint blockPerSide = iDivUp(sqrt(numParticles), blockDim.x);
+        uint blockPerSide = iDivUp(sqrt((float)numParticles), blockDim.x);
         dim3 gridDim(blockPerSide, blockPerSide);
-        uint sideLength = sqrt(numParticles);
+        uint sideLength = sqrt((float)numParticles);
         //cudaMemcpy(prevPos, pos, sizeof(float) * 4 * numParticles, cudaMemcpyDeviceToDevice);
-        parallel_kernel<<< gridDim, blockDim >>> (prevPos, pos, vel, deltaTime, sideLength, mass, dist, damp);
+        parallel_kernel<<< gridDim, blockDim >>> (prevPos, pos, vel, sideLength);
     }
 
 

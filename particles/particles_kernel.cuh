@@ -30,7 +30,7 @@ struct SimParams
     float3 worldOrigin;
     float3 cellSize;
 
-    uint numBodies;
+    uint numParticles;
     uint maxParticlesPerCell;
 
     float spring;
@@ -38,6 +38,11 @@ struct SimParams
     float shear;
     float attraction;
     float boundaryDamping;
+
+	float dt;
+	float offset;
+	float damp;
+	float mass;
 };
 
 #endif

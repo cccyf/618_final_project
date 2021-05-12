@@ -57,7 +57,7 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     // set simulation parameters
     m_params.gridSize = m_gridSize;
     m_params.numCells = m_numGridCells;
-    m_params.numBodies = m_numParticles;
+    m_params.numParticles = m_numParticles;
 
     m_params.particleRadius = 0.025f;
     m_params.colliderPos = make_float3(1.5f, -0.25f, 1.5f);
@@ -77,10 +77,10 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
     m_params.gravity = make_float3(0.0f, -0.0003f, 0.0f);
     m_params.globalDamping = 1.0f;
 
-    dt = 0.01f;
-    offset = 0.05f;
-    damp = 0.98f;
-    mass = 1.f;
+	m_params.dt = 0.01f;
+	m_params.offset = 0.05f;
+	m_params.damp = 0.98f;
+	m_params.mass = 1.f;
 
     sdkCreateTimer(&integrate_t);
     sdkCreateTimer(&collide_t);
@@ -283,7 +283,7 @@ bool check_collision(float* p1, float*p2, float dist) {
 void
 ParticleSystem::update(float deltaTime)
 {   
-    int type = 0; // 0/1 for sequential or omp, 2 for cuda
+    int type = 2; // 0/1 for sequential or omp, 2 for cuda
     if (type <= 1) {
         sdkStartTimer(&integrate_t);
         float* dPos = m_hPos;
@@ -295,12 +295,12 @@ ParticleSystem::update(float deltaTime)
 
 		#pragma omp parallel for
         for (int i = 1; i < m_numParticles - 1; i++) {
-            force_accumulator = make_vector(0.0f, -9.8f * mass, 0.0f);
+            force_accumulator = make_vector(0.0f, -9.8f * m_params.mass, 0.0f);
             uint xind = i % side;
             uint yind = i / side;
             float* cPos = &dPos[(xind + yind * side) * 4];
             float* cVel = &dVel[(xind + yind * side) * 4];
-            float dist = offset;
+            float dist = m_params.offset;
             if (xind > 0) {
                 float* nPos = &dPos[(xind - 1 + yind * side) * 4];
                 float* nVel = &dVel[(xind - 1 + yind * side) * 4];
@@ -378,8 +378,8 @@ ParticleSystem::update(float deltaTime)
             }
             Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
             Vector3f vel = make_vector(cVel[0], cVel[1], cVel[2]);
-            pos += dt * vel;
-            vel = damp * vel + dt * force_accumulator / mass;
+            pos += m_params.dt * vel;
+            vel = m_params.damp * vel + m_params.dt * force_accumulator / m_params.mass;
             cPos[0] = pos.x;
             cPos[1] = std::max(-10.f, pos.y);
             cPos[2] = pos.z;
@@ -409,7 +409,7 @@ ParticleSystem::update(float deltaTime)
 		for (int ij = 0; ij < m_numParticles*m_numParticles; ij++) {
 			int i = ij / m_numParticles;
 			int j = ij % m_numParticles;
-			if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4 * i], &dPos[4 * j], offset))) {
+			if (i <= j || is_neighbor(i, j, side) || !(check_collision(&dPos[4 * i], &dPos[4 * j], m_params.offset))) {
 				continue;
 			}
 			// reset position
@@ -455,7 +455,7 @@ ParticleSystem::update(float deltaTime)
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
         setParameters(&m_params);
         sdkStartTimer(&integrate_t);
-        parallel_sim(m_prevPos, dPos, m_dVel, dt, m_numParticles, mass, offset, damp);
+        parallel_sim(m_prevPos, dPos, m_dVel, m_params.numParticles);
         sdkStopTimer(&integrate_t);
         sdkStartTimer(&collide_t);
         calcHash(
@@ -676,9 +676,9 @@ ParticleSystem::reset(ParticleConfig config)
                 for (uint i = 0; i < m_numParticles; i++) {
                     uint xind = i % side;
                     uint yind = i / side;
-                    m_hPos[p++] = start_x + xind * offset;
+                    m_hPos[p++] = start_x + xind * m_params.offset;
                     m_hPos[p++] = 0.f;
-                    m_hPos[p++] = start_y + yind * offset;
+                    m_hPos[p++] = start_y + yind * m_params.offset;
                     m_hPos[p++] = 1.0f; // radius
                     m_hVel[v++] = 0.0f;
                     m_hVel[v++] = 0.0f;
