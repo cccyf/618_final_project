@@ -107,13 +107,18 @@
     <Link>
       <AdditionalDependencies>glew64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <ClCompile>
+      <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OpenMPSupport>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="omp_sim.cpp" />
     <ClCompile Include="particleSystem.cpp" />
     <CudaCompile Include="particleSystem_cuda.cu" />
     <ClCompile Include="particles.cpp" />
     <ClCompile Include="render_particles.cpp" />
     <ClCompile Include="shaders.cpp" />
+    <ClInclude Include="omp_sim.h" />
     <ClInclude Include="particleSystem.h" />
     <ClInclude Include="render_particles.h" />
     <ClInclude Include="shaders.h" />

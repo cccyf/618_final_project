@@ -45,11 +45,11 @@ void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_para
 	float* prevVel = (float*)malloc(sizeof(float) * 4 * m_numParticles);
 	memcpy(prevVel, dVel, 4 * m_numParticles * sizeof(float));
 	uint side = sqrt(m_numParticles);
-	Vector3f force_accumulator;
+	//Vector3f force_accumulator;
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(dynamic, 64)
 	for (int i = 1; i < m_numParticles - 1; i++) {
-		force_accumulator = make_vector(0.0f, -9.8f * m_params.mass, 0.0f);
+		Vector3f force_accumulator = make_vector(0.0f, -0.098f * m_params.mass, 0.0f);
 		uint xind = i % side;
 		uint yind = i / side;
 		float* cPos = &dPos[(xind + yind * side) * 4];

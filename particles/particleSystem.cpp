@@ -282,7 +282,7 @@ void ParticleSystem::seq_sim() {
 	Vector3f force_accumulator;
 
 	for (int i = 1; i < m_numParticles - 1; i++) {
-		force_accumulator = make_vector(0.0f, -9.8f * m_params.mass, 0.0f);
+		force_accumulator = make_vector(0.0f, -0.098f * m_params.mass, 0.0f);
 		uint xind = i % side;
 		uint yind = i / side;
 		float* cPos = &dPos[(xind + yind * side) * 4];
@@ -418,14 +418,14 @@ void ParticleSystem::seq_sim() {
 void
 ParticleSystem::update(float deltaTime)
 {   
-    int type = 0; // 0/1 for sequential or omp, 2 for cuda
+    int type = 2; // 0/1 for sequential or omp, 2 for cuda
 	if (type == 0) {
 		seq_sim();
-		//setArray(POSITION, m_hPos, 0, m_numParticles);
+		setArray(POSITION, m_hPos, 0, m_numParticles);
 	}else
     if (type == 1) {
 		omp_sim(m_hPos, m_hVel, m_numParticles, m_params, integrate_t, collide_t, total_t);
-		//setArray(POSITION, m_hPos, 0, m_numParticles);
+		setArray(POSITION, m_hPos, 0, m_numParticles);
 	}
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);

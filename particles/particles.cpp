@@ -65,7 +65,7 @@ int ox, oy;
 int buttonState = 0;
 //float camera_trans[] = {0, 0, -3};
 //float camera_rot[]   = {0, 0, 0};
-float camera_trans[] = { -1.5f, 1.5f, -8.0f };
+float camera_trans[] = { -2.25f, 2.0f, -9.0f };
 float camera_rot[] = { 30, 0, 0 };
 float camera_trans_lag[] = {0, 0, -3};
 float camera_rot_lag[] = {0, 0, 0};
@@ -559,7 +559,7 @@ void key(unsigned char key, int /*x*/, int /*y*/)
             break;
 
         case '3':
-            addSphere();
+            psystem->reset(ParticleSystem::CONFIG_CLOTH);
             break;
 
         case '4':
