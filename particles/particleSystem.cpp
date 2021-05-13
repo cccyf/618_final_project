@@ -36,6 +36,7 @@
 
 StopWatchInterface* integrate_t = NULL;
 StopWatchInterface* collide_t = NULL;
+StopWatchInterface* total_t = NULL;
 
 ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenGL) :
     m_bInitialized(false),
@@ -84,6 +85,7 @@ ParticleSystem::ParticleSystem(uint numParticles, uint3 gridSize, bool bUseOpenG
 
     sdkCreateTimer(&integrate_t);
     sdkCreateTimer(&collide_t);
+	sdkCreateTimer(&total_t);
 
     _initialize(numParticles);
 }
@@ -269,7 +271,9 @@ bool check_collision(float* p1, float*p2, float dist) {
 }
 
 void ParticleSystem::seq_sim() {
+	sdkStartTimer(&total_t);
 	sdkStartTimer(&integrate_t);
+
 	float* dPos = m_hPos;
 	float* dVel = m_hVel;
 	float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
@@ -407,24 +411,26 @@ void ParticleSystem::seq_sim() {
 	}
 	delete prevPos;
 	sdkStopTimer(&collide_t);
+	sdkStopTimer(&total_t);
 }
 
 // step the simulation
 void
 ParticleSystem::update(float deltaTime)
 {   
-    int type = 2; // 0/1 for sequential or omp, 2 for cuda
+    int type = 0; // 0/1 for sequential or omp, 2 for cuda
 	if (type == 0) {
 		seq_sim();
-		setArray(POSITION, m_hPos, 0, m_numParticles);
+		//setArray(POSITION, m_hPos, 0, m_numParticles);
 	}else
     if (type == 1) {
-		omp_sim(m_hPos, m_hVel, m_numParticles, m_params);
-		setArray(POSITION, m_hPos, 0, m_numParticles);
+		omp_sim(m_hPos, m_hVel, m_numParticles, m_params, integrate_t, collide_t, total_t);
+		//setArray(POSITION, m_hPos, 0, m_numParticles);
 	}
     else {
         float* dPos = (float*)mapGLBufferObject(&m_cuda_posvbo_resource);
         setParameters(&m_params);
+		sdkStartTimer(&total_t);
         sdkStartTimer(&integrate_t);
         parallel_sim(m_prevPos, dPos, m_dVel, m_params.numParticles);
         sdkStopTimer(&integrate_t);
@@ -458,11 +464,13 @@ ParticleSystem::update(float deltaTime)
             m_numParticles,
             m_numGridCells);
         sdkStopTimer(&collide_t);
+		sdkStopTimer(&total_t);
         unmapGLBufferObject(m_cuda_posvbo_resource);
     }
     
 
-    //printf("integration time: %.3f; collide time: %.3f\n", sdkGetAverageTimerValue(&integrate_t), sdkGetAverageTimerValue(&collide_t));
+    printf("integration time: %.3f; collide time: %.3f, total time:%.3f\n", sdkGetAverageTimerValue(&integrate_t), sdkGetAverageTimerValue(&collide_t),
+		sdkGetAverageTimerValue(&total_t));
 }
 
 void

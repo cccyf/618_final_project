@@ -55,8 +55,8 @@
 #define MAX_EPSILON_ERROR 5.00f
 #define THRESHOLD         0.30f
 
-#define GRID_SIZE       64
-#define NUM_PARTICLES   4096
+#define GRID_SIZE       256
+#define NUM_PARTICLES   65536
 
 const uint width = 640, height = 480;
 

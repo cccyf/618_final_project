@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <algorithm>
 
-
 Vector3f omp_compute_force(float* p1, float* p2, float* v1, float* v2, float m_dist) {
 	float m_ks = 50.f;
 	float m_kd = 0.98f;
@@ -32,11 +31,19 @@ bool omp_check_collision(float* p1, float*p2, float dist) {
 }
 
 
-void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_params) {
+void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_params,
+	StopWatchInterface* omp_integrate_t,
+	StopWatchInterface* omp_collide_t,
+	StopWatchInterface* omp_total_t) {
+	sdkStartTimer(&omp_total_t);
+	sdkStartTimer(&omp_integrate_t);
+
 	float* dPos = m_hPos;
 	float* dVel = m_hVel;
 	float* prevPos = (float*)malloc(sizeof(float) * 4 * m_numParticles);
 	memcpy(prevPos, dPos, 4 * m_numParticles * sizeof(float));
+	float* prevVel = (float*)malloc(sizeof(float) * 4 * m_numParticles);
+	memcpy(prevVel, dVel, 4 * m_numParticles * sizeof(float));
 	uint side = sqrt(m_numParticles);
 	Vector3f force_accumulator;
 
@@ -49,78 +56,78 @@ void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_para
 		float* cVel = &dVel[(xind + yind * side) * 4];
 		float dist = m_params.offset;
 		if (xind > 0) {
-			float* nPos = &dPos[(xind - 1 + yind * side) * 4];
-			float* nVel = &dVel[(xind - 1 + yind * side) * 4];
+			float* nPos = &prevPos[(xind - 1 + yind * side) * 4];
+			float* nVel = &prevVel[(xind - 1 + yind * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (yind > 0) {
-			float* nPos = &dPos[(xind + (yind - 1) * side) * 4];
-			float* nVel = &dVel[(xind + (yind - 1) * side) * 4];
+			float* nPos = &prevPos[(xind + (yind - 1) * side) * 4];
+			float* nVel = &prevVel[(xind + (yind - 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (xind < side - 1) {
-			float* nPos = &dPos[(xind + 1 + yind * side) * 4];
-			float* nVel = &dVel[(xind + 1 + yind * side) * 4];
+			float* nPos = &prevPos[(xind + 1 + yind * side) * 4];
+			float* nVel = &prevVel[(xind + 1 + yind * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (yind < side - 1) {
-			float* nPos = &dPos[(xind + (yind + 1) * side) * 4];
-			float* nVel = &dVel[(xind + (yind + 1) * side) * 4];
+			float* nPos = &prevPos[(xind + (yind + 1) * side) * 4];
+			float* nVel = &prevVel[(xind + (yind + 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		dist *= sqrt(2);
 
 		if (xind > 0 && yind > 0) {
-			float* nPos = &dPos[(xind - 1 + (yind - 1) * side) * 4];
-			float* nVel = &dVel[(xind - 1 + (yind - 1) * side) * 4];
+			float* nPos = &prevPos[(xind - 1 + (yind - 1) * side) * 4];
+			float* nVel = &prevVel[(xind - 1 + (yind - 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (xind < side - 1 && yind > 0) {
-			float* nPos = &dPos[(xind + 1 + (yind - 1) * side) * 4];
-			float* nVel = &dVel[(xind + 1 + (yind - 1) * side) * 4];
+			float* nPos = &prevPos[(xind + 1 + (yind - 1) * side) * 4];
+			float* nVel = &prevVel[(xind + 1 + (yind - 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (xind > 0 && yind < side - 1) {
-			float* nPos = &dPos[(xind - 1 + (yind + 1) * side) * 4];
-			float* nVel = &dVel[(xind - 1 + (yind + 1) * side) * 4];
+			float* nPos = &prevPos[(xind - 1 + (yind + 1) * side) * 4];
+			float* nVel = &prevVel[(xind - 1 + (yind + 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (xind < side - 1 && yind < side - 1) {
-			float* nPos = &dPos[(xind + 1 + (yind + 1) * side) * 4];
-			float* nVel = &dVel[(xind + 1 + (yind + 1) * side) * 4];
+			float* nPos = &prevPos[(xind + 1 + (yind + 1) * side) * 4];
+			float* nVel = &prevVel[(xind + 1 + (yind + 1) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		dist *= sqrt(2);
 
 		if (xind > 1) {
-			float* nPos = &dPos[(xind - 2 + yind * side) * 4];
-			float* nVel = &dVel[(xind - 2 + yind * side) * 4];
+			float* nPos = &prevPos[(xind - 2 + yind * side) * 4];
+			float* nVel = &prevVel[(xind - 2 + yind * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (yind > 1) {
-			float* nPos = &dPos[(xind + (yind - 2) * side) * 4];
-			float* nVel = &dVel[(xind + (yind - 2) * side) * 4];
+			float* nPos = &prevPos[(xind + (yind - 2) * side) * 4];
+			float* nVel = &prevVel[(xind + (yind - 2) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (xind < side - 2) {
-			float* nPos = &dPos[(xind + 2 + yind * side) * 4];
-			float* nVel = &dVel[(xind + 2 + yind * side) * 4];
+			float* nPos = &prevPos[(xind + 2 + yind * side) * 4];
+			float* nVel = &prevVel[(xind + 2 + yind * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 
 		if (yind < side - 2) {
-			float* nPos = &dPos[(xind + (yind + 2) * side) * 4];
-			float* nVel = &dVel[(xind + (yind + 2) * side) * 4];
+			float* nPos = &prevPos[(xind + (yind + 2) * side) * 4];
+			float* nVel = &prevVel[(xind + (yind + 2) * side) * 4];
 			force_accumulator += omp_compute_force(cPos, nPos, cVel, nVel, dist);
 		}
 		Vector3f pos = make_vector(cPos[0], cPos[1], cPos[2]);
@@ -134,7 +141,10 @@ void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_para
 		cVel[1] = vel.y;
 		cVel[2] = vel.z;
 	}
+	sdkStopTimer(&omp_integrate_t);
 
+
+	sdkStartTimer(&omp_collide_t);
 	// collission detection with sphere
 	Vector3f sphere = make_vector(m_params.colliderPos.x, m_params.colliderPos.y, m_params.colliderPos.z);
 	//#pragma omp parallel for
@@ -149,14 +159,8 @@ void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_para
 	}
 
 #pragma omp parallel for schedule(dynamic, 64)
-	//for (int ij = 0; ij < m_numParticles*m_numParticles; ij++) {
 	for (int i = 0; i < m_numParticles; i++) {
 		for (int j = 0; j < m_numParticles; j++) {
-
-			//	}
-			//}
-			//int i = ij / m_numParticles;
-			//int j = ij % m_numParticles;
 			if (i <= j || omp_is_neighbor(i, j, side) || !(omp_check_collision(&dPos[4 * i], &dPos[4 * j], m_params.offset))) {
 				continue;
 			}
@@ -174,5 +178,9 @@ void omp_sim(float* m_hPos, float* m_hVel, uint m_numParticles, SimParams m_para
 		}
 	}
 
+	sdkStopTimer(&omp_collide_t);
+	sdkStopTimer(&omp_total_t);
+
 	delete prevPos;
+	delete prevVel;
 }
